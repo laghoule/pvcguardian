@@ -1,0 +1,33 @@
+# Git metadata
+.git/
+.gitignore
+
+# Compiled binaries and local builds
+bin/
+dist/
+pvcguardian
+
+# Go test and coverage output
+*.out
+*.test
+coverage.txt
+
+# Helm charts and manifests
+deploy/
+
+# Documentation and markdown notes
+*.md
+docs/
+
+# Editor and IDE configurations
+.idea/
+.vscode/
+*.swp
+*~
+
+# OS artifacts
+.DS_Store
+
+# Ephemeral local configs
+config.local.yaml
+*.tmp

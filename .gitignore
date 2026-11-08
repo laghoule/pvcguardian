@@ -1,0 +1,21 @@
+# Binaries
+bin/
+dist/
+/pvcguardian
+
+# Go test and coverage
+*.out
+*.test
+coverage.txt
+
+# IDE / Editor
+.idea/
+.vscode/
+*.swp
+*~
+
+# OS artifacts
+.DS_Store
+
+# Ephemeral config
+config.local.yaml

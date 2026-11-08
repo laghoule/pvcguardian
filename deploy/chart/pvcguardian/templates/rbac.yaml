@@ -1,0 +1,46 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "pvcguardian.fullname" . }}
+  labels:
+    {{- include "pvcguardian.labels" . | nindent 4 }}
+rules:
+  # Opt-in namespace discovery
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list"]
+
+  # Workload discovery for Helm releases (Deployment, StatefulSet, DaemonSet)
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets"]
+    verbs: ["list"]
+
+  # Workload discovery for Batch workloads (CronJobs, Jobs)
+  - apiGroups: ["batch"]
+    resources: ["cronjobs", "jobs"]
+    verbs: ["list"]
+
+  # PVC association & coverage checks
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["list"]
+
+  # Velero Schedules lifecycle management
+  - apiGroups: ["velero.io"]
+    resources: ["schedules"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "pvcguardian.fullname" . }}
+  labels:
+    {{- include "pvcguardian.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "pvcguardian.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "pvcguardian.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}

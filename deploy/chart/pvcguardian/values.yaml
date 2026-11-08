@@ -1,0 +1,89 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/laghoule/pvcguardian
+  pullPolicy: IfNotPresent
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 50m
+    memory: 64Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+config:
+  selectors:
+    label: pvcguardian.io/enabled
+    requirePVC: true
+    defaultPreset: evening
+    namespaces: {}
+    releases: []
+
+  velero:
+    namespace: velero
+    storageLocation: ""
+    defaultVolumesToFsBackup: true
+
+  schedules:
+    timezone: UTC
+    retention: 5d
+    windows:
+      day:
+        from: "10:00"
+        to: "16:00"
+      evening:
+        from: "20:00"
+        to: "23:00"
+      night:
+        from: "01:00"
+        to: "04:00"
+    cron: {}
+
+  reconcile:
+    interval: 15m
+
+  logging:
+    level: info
+    format: json
+
+  metrics:
+    enabled: true
+    addr: ":8080"
+
+dashboard:
+  enabled: true
+  namespace: "" # defaults to release namespace
+  labels:
+    grafana_dashboard: "1" # automatically imported by grafana-sidecar if enabled
+  annotations: {}

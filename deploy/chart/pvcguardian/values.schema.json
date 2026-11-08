@@ -1,0 +1,252 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "Values",
+  "type": "object",
+  "required": [
+    "replicaCount",
+    "image",
+    "serviceAccount",
+    "config"
+  ],
+  "properties": {
+    "replicaCount": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Number of PVCGuardian daemon replicas"
+    },
+    "image": {
+      "type": "object",
+      "required": ["repository", "pullPolicy"],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pullPolicy": {
+          "type": "string",
+          "enum": ["Always", "IfNotPresent", "Never"]
+        },
+        "tag": {
+          "type": "string"
+        }
+      }
+    },
+    "imagePullSecrets": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "nameOverride": {
+      "type": "string"
+    },
+    "fullnameOverride": {
+      "type": "string"
+    },
+    "serviceAccount": {
+      "type": "object",
+      "required": ["create"],
+      "properties": {
+        "create": {
+          "type": "boolean"
+        },
+        "annotations": {
+          "type": "object"
+        },
+        "name": {
+          "type": "string"
+        }
+      }
+    },
+    "podAnnotations": {
+      "type": "object"
+    },
+    "podLabels": {
+      "type": "object"
+    },
+    "podSecurityContext": {
+      "type": "object",
+      "properties": {
+        "runAsNonRoot": { "type": "boolean" },
+        "runAsUser": { "type": "integer" },
+        "runAsGroup": { "type": "integer" },
+        "fsGroup": { "type": "integer" }
+      }
+    },
+    "securityContext": {
+      "type": "object",
+      "properties": {
+        "readOnlyRootFilesystem": { "type": "boolean" },
+        "allowPrivilegeEscalation": { "type": "boolean" }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "properties": {
+        "limits": {
+          "type": "object",
+          "properties": {
+            "cpu": { "type": "string" },
+            "memory": { "type": "string" }
+          }
+        },
+        "requests": {
+          "type": "object",
+          "properties": {
+            "cpu": { "type": "string" },
+            "memory": { "type": "string" }
+          }
+        }
+      }
+    },
+    "nodeSelector": { "type": "object" },
+    "tolerations": { "type": "array" },
+    "affinity": { "type": "object" },
+    "config": {
+      "type": "object",
+      "required": ["selectors", "velero", "schedules", "reconcile", "logging", "metrics"],
+      "properties": {
+        "selectors": {
+          "type": "object",
+          "required": ["label", "requirePVC", "defaultPreset"],
+          "properties": {
+            "label": {
+              "type": "string",
+              "minLength": 1
+            },
+            "requirePVC": {
+              "type": "boolean"
+            },
+            "defaultPreset": {
+              "type": "string",
+              "minLength": 1
+            },
+            "namespaces": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "releases": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["namespace", "name", "preset"],
+                "properties": {
+                  "namespace": { "type": "string", "minLength": 1 },
+                  "name": { "type": "string", "minLength": 1 },
+                  "preset": { "type": "string", "minLength": 1 }
+                }
+              }
+            }
+          }
+        },
+        "velero": {
+          "type": "object",
+          "required": ["namespace", "defaultVolumesToFsBackup"],
+          "properties": {
+            "namespace": {
+              "type": "string",
+              "minLength": 1
+            },
+            "storageLocation": {
+              "type": "string"
+            },
+            "defaultVolumesToFsBackup": {
+              "type": "boolean"
+            }
+          }
+        },
+        "schedules": {
+          "type": "object",
+          "required": ["timezone", "retention", "windows"],
+          "properties": {
+            "timezone": {
+              "type": "string",
+              "minLength": 1
+            },
+            "retention": {
+              "type": "string",
+              "pattern": "^[0-9]+[dhm]$",
+              "description": "Retention duration like 5d, 48h, 30m"
+            },
+            "windows": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "required": ["from", "to"],
+                "properties": {
+                  "from": {
+                    "type": "string",
+                    "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+                    "description": "Time in HH:MM format"
+                  },
+                  "to": {
+                    "type": "string",
+                    "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+                    "description": "Time in HH:MM format"
+                  }
+                }
+              }
+            },
+            "cron": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "pattern": "^\\S+\\s+\\S+\\s+\\S+\\s+\\S+\\s+\\S+$",
+                "description": "Standard 5-part cron expression"
+              }
+            }
+          }
+        },
+        "reconcile": {
+          "type": "object",
+          "required": ["interval"],
+          "properties": {
+            "interval": {
+              "type": "string",
+              "pattern": "^[0-9]+(s|m|h)$"
+            }
+          }
+        },
+        "logging": {
+          "type": "object",
+          "required": ["level", "format"],
+          "properties": {
+            "level": {
+              "type": "string",
+              "enum": ["debug", "info", "warn", "error"]
+            },
+            "format": {
+              "type": "string",
+              "enum": ["json", "text"]
+            }
+          }
+        },
+        "metrics": {
+          "type": "object",
+          "required": ["enabled", "addr"],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "addr": {
+              "type": "string",
+              "pattern": "^.*:[0-9]+$"
+            }
+          }
+        }
+      }
+    },
+    "dashboard": {
+      "type": "object",
+      "required": ["enabled"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "namespace": { "type": "string" },
+        "labels": { "type": "object" },
+        "annotations": { "type": "object" }
+      }
+    }
+  }
+}
