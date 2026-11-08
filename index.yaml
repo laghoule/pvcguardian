@@ -1,0 +1,25 @@
+apiVersion: v1
+entries:
+  pvcguardian:
+  - apiVersion: v2
+    appVersion: 0.1.0
+    created: "2026-11-08T22:31:01.207822146Z"
+    description: Automated Velero schedule generator for Helm releases with PVCs
+    digest: 768901bb1be70d301e1a375c7709f20eb8d0d28ee0cc9860f037923fe5ac9620
+    home: https://github.com/laghoule/pvcguardian
+    keywords:
+    - backup
+    - velero
+    - pvc
+    - storage
+    - helm
+    maintainers:
+    - name: laghoule
+    name: pvcguardian
+    sources:
+    - https://github.com/laghoule/pvcguardian
+    type: application
+    urls:
+    - https://github.com/laghoule/pvcguardian/releases/download/pvcguardian-0.1.0/pvcguardian-0.1.0.tgz
+    version: 0.1.0
+generated: "2026-11-08T22:31:01.20783489Z"
