@@ -105,6 +105,12 @@ kubectl get schedules -n velero -l app.kubernetes.io/managed-by=pvcguardian
 
 ---
 
+## AI-assisted development
+
+This chart, its templates, its JSON Schema validation, and this documentation were created with the help of an AI coding agent (OpenCode), under human review and direction. Changes were validated with JSON Schema validation and Go unit tests before being committed.
+
+---
+
 ## Uninstall
 
 ```bash

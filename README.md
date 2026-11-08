@@ -124,6 +124,12 @@ make image
 
 ---
 
+## AI-assisted development
+
+This project, its Helm chart, its CI/CD workflows, and this documentation were created with the help of an AI coding agent (OpenCode), under human review and direction. All Go code was validated with `go test -race`, `go vet`, and static checks, and the Helm chart was validated against JSON Schema specifications before being committed.
+
+---
+
 ## License
 
 This project is licensed under the GNU General Public License v3.0 (`GPL-3.0-only`). See [LICENSE](LICENSE) for the full license text.
