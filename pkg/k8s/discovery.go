@@ -19,6 +19,13 @@ const (
 	HelmInstanceLabel  = "app.kubernetes.io/instance"
 	HelmChartLabel     = "helm.sh/chart"
 	HelmManagedByValue = "Helm"
+
+	// OptInLabel marks a workload as explicitly opted in to PVCGuardian.
+	OptInLabel = "pvcguardian.io/enabled"
+	// PresetAnnotation selects the schedule preset on a workload.
+	PresetAnnotation = "pvcguardian.io/preset"
+	// ReleaseLabel explicitly attaches a PVC to a Helm release by name.
+	ReleaseLabel = "pvcguardian.io/release"
 )
 
 // DiscoveredRelease represents an identified Helm release.
@@ -71,7 +78,7 @@ func (d *Discovery) ListScannableNamespaces(ctx context.Context, excluded []stri
 }
 
 // DiscoverReleases scans workloads in a namespace and associates their PVCs.
-func (d *Discovery) DiscoverReleases(ctx context.Context, namespace, optInLabel, presetAnnotation, releaseLabel string) ([]DiscoveredRelease, []string, error) {
+func (d *Discovery) DiscoverReleases(ctx context.Context, namespace string) ([]DiscoveredRelease, []string, error) {
 	type releaseMeta struct {
 		chart    string
 		optIn    bool
@@ -113,14 +120,14 @@ func (d *Discovery) DiscoverReleases(ctx context.Context, namespace, optInLabel,
 			rm.chart = meta.Labels[HelmChartLabel]
 		}
 
-		if val, ok := meta.Labels[optInLabel]; ok {
+		if val, ok := meta.Labels[OptInLabel]; ok {
 			if strings.EqualFold(strings.TrimSpace(val), "true") {
 				rm.optIn = true
 			}
 		}
 
 		if meta.Annotations != nil && rm.preset == "" {
-			if p, ok := meta.Annotations[presetAnnotation]; ok {
+			if p, ok := meta.Annotations[PresetAnnotation]; ok {
 				rm.preset = strings.TrimSpace(p)
 			}
 		}
@@ -189,7 +196,7 @@ func (d *Discovery) DiscoverReleases(ctx context.Context, namespace, optInLabel,
 		matched := make(map[string]struct{})
 
 		// Explicit per-PVC release association takes precedence.
-		if release := strings.TrimSpace(pvc.Labels[releaseLabel]); release != "" {
+		if release := strings.TrimSpace(pvc.Labels[ReleaseLabel]); release != "" {
 			if _, ok := releases[release]; ok {
 				matched[release] = struct{}{}
 			} else {
@@ -197,7 +204,7 @@ func (d *Discovery) DiscoverReleases(ctx context.Context, namespace, optInLabel,
 					"namespace", namespace,
 					"pvc", pvc.Name,
 					"release", release,
-					"label", releaseLabel)
+					"label", ReleaseLabel)
 			}
 		}
 

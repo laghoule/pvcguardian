@@ -84,9 +84,9 @@ func (r *Reconciler) ReconcileOnce(ctx context.Context) (*ReconcileResult, error
 	result := &ReconcileResult{}
 	start := time.Now()
 
-	r.logger.Info("Starting reconciliation cycle", "optInLabel", r.cfg.Selectors.Label)
+	r.logger.Info("Starting reconciliation cycle", "optInLabel", k8s.OptInLabel)
 
-	namespaces, err := r.discovery.ListScannableNamespaces(ctx, r.cfg.Selectors.ExcludeNamespaces)
+	namespaces, err := r.discovery.ListScannableNamespaces(ctx, r.cfg.Discovery.ExcludeNamespaces)
 	if err != nil {
 		return nil, fmt.Errorf("listing scannable namespaces: %w", err)
 	}
@@ -97,7 +97,7 @@ func (r *Reconciler) ReconcileOnce(ctx context.Context) (*ReconcileResult, error
 	totalUncovered := 0
 
 	for _, ns := range namespaces {
-		releases, uncovered, err := r.discovery.DiscoverReleases(ctx, ns, r.cfg.Selectors.Label, r.cfg.Selectors.PresetAnnotation, r.cfg.Selectors.ReleaseLabel)
+		releases, uncovered, err := r.discovery.DiscoverReleases(ctx, ns)
 		if err != nil {
 			r.logger.Error("Failed to discover releases in namespace", "namespace", ns, "error", err)
 			continue
@@ -122,7 +122,7 @@ func (r *Reconciler) ReconcileOnce(ctx context.Context) (*ReconcileResult, error
 				continue
 			}
 
-			if r.cfg.Selectors.RequirePVC && len(rel.PVCs) == 0 {
+			if r.cfg.Discovery.RequirePVC && len(rel.PVCs) == 0 {
 				r.logger.Info("Skipping release with no PersistentVolumeClaims (requirePVC=true)",
 					"namespace", ns, "release", rel.Name)
 				result.SkippedReleases++

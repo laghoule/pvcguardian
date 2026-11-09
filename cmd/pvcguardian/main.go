@@ -49,7 +49,7 @@ func main() {
 		"version", version,
 		"commit", commit,
 		"reconcileInterval", cfg.Reconcile.Interval,
-		"optInLabel", cfg.Selectors.Label,
+		"optInLabel", k8s.OptInLabel,
 		"veleroNamespace", cfg.Velero.Namespace)
 
 	restConfig, err := buildKubeConfig(*kubeconfig)

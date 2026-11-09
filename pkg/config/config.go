@@ -51,11 +51,8 @@ func parseHHMM(s string) (int, error) {
 	return h*60 + m, nil
 }
 
-// SelectorsConfig controls how releases are selected for backup.
-type SelectorsConfig struct {
-	Label             string   `yaml:"label"`             // default "pvcguardian.io/enabled"
-	PresetAnnotation  string   `yaml:"presetAnnotation"`  // default "pvcguardian.io/preset"
-	ReleaseLabel      string   `yaml:"releaseLabel"`      // default "pvcguardian.io/release"
+// DiscoveryConfig controls how releases and PVCs are discovered.
+type DiscoveryConfig struct {
 	RequirePVC        bool     `yaml:"requirePVC"`        // default true
 	DefaultPreset     string   `yaml:"defaultPreset"`     // default "evening"
 	ExcludeNamespaces []string `yaml:"excludeNamespaces"` // default [kube-system]
@@ -95,7 +92,7 @@ type MetricsConfig struct {
 
 // Config is the top-level configuration structure.
 type Config struct {
-	Selectors SelectorsConfig `yaml:"selectors"`
+	Discovery DiscoveryConfig `yaml:"discovery"`
 	Velero    VeleroConfig    `yaml:"velero"`
 	Schedules SchedulesConfig `yaml:"schedules"`
 	Reconcile ReconcileConfig `yaml:"reconcile"`
@@ -106,12 +103,9 @@ type Config struct {
 // DefaultConfig returns a complete configuration with production defaults.
 func DefaultConfig() Config {
 	return Config{
-		Selectors: SelectorsConfig{
-			Label:            "pvcguardian.io/enabled",
-			PresetAnnotation: "pvcguardian.io/preset",
-			ReleaseLabel:     "pvcguardian.io/release",
-			RequirePVC:       true,
-			DefaultPreset:    "evening",
+		Discovery: DiscoveryConfig{
+			RequirePVC:    true,
+			DefaultPreset: "evening",
 			ExcludeNamespaces: []string{
 				"kube-system",
 			},
@@ -170,17 +164,9 @@ func Load(path string) (*Config, error) {
 
 // Validate ensures consistency of all configuration entries.
 func (c *Config) Validate() error {
-	if strings.TrimSpace(c.Selectors.Label) == "" {
-		return fmt.Errorf("selectors.label cannot be empty")
-	}
-
-	if strings.TrimSpace(c.Selectors.ReleaseLabel) == "" {
-		return fmt.Errorf("selectors.releaseLabel cannot be empty")
-	}
-
 	// Validate defaultPreset exists in windows or custom cron
-	if !c.HasPreset(c.Selectors.DefaultPreset) {
-		return fmt.Errorf("selectors.defaultPreset %q is not defined in schedules.windows or schedules.cron", c.Selectors.DefaultPreset)
+	if !c.HasPreset(c.Discovery.DefaultPreset) {
+		return fmt.Errorf("discovery.defaultPreset %q is not defined in schedules.windows or schedules.cron", c.Discovery.DefaultPreset)
 	}
 
 	// Validate windows

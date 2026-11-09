@@ -103,7 +103,7 @@ func TestDiscoverReleasesAndUncoveredPVCs(t *testing.T) {
 	)
 
 	discovery := NewDiscovery(client, nil)
-	releases, uncovered, err := discovery.DiscoverReleases(context.Background(), "prod", "pvcguardian.io/enabled", "pvcguardian.io/preset", "pvcguardian.io/release")
+	releases, uncovered, err := discovery.DiscoverReleases(context.Background(), "prod")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -231,7 +231,7 @@ func TestDiscoverReleasesViaWorkloadVolumesAndOwnerReferences(t *testing.T) {
 	)
 
 	discovery := NewDiscovery(client, nil)
-	releases, uncovered, err := discovery.DiscoverReleases(context.Background(), "prod", "pvcguardian.io/enabled", "pvcguardian.io/preset", "pvcguardian.io/release")
+	releases, uncovered, err := discovery.DiscoverReleases(context.Background(), "prod")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

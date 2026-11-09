@@ -60,7 +60,7 @@ func TestReconcileOnceCreatesAndDeletesOrphans(t *testing.T) {
 	)
 
 	cfg := config.DefaultConfig()
-	cfg.Selectors.RequirePVC = true
+	cfg.Discovery.RequirePVC = true
 	cfg.Velero.Namespace = "velero"
 
 	discovery := k8s.NewDiscovery(kubeClient, nil)

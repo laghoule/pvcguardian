@@ -29,10 +29,7 @@
 ## Configuration Example
 
 ```yaml
-selectors:
-  label: pvcguardian.io/enabled            # Opt-in label key (expects "true")
-  presetAnnotation: pvcguardian.io/preset  # Workload annotation to select preset (e.g. "night")
-  releaseLabel: pvcguardian.io/release     # PVC label to attach a PVC to a release by name
+discovery:
   requirePVC: true                         # Skip releases without PVCs
   defaultPreset: evening                   # Default preset applied to opted-in releases
   excludeNamespaces:                       # Namespaces excluded from discovery
@@ -76,7 +73,7 @@ metrics:
 ## Known Limitations
 
 1. **Workload-less Helm Charts**: Releases that deploy only ConfigMaps, Secrets, or CRDs (without any Deployment, StatefulSet, DaemonSet, CronJob, or Job) are invisible to PVCGuardian since it does not inspect Helm Secrets.
-2. **Missing `app.kubernetes.io/instance` Label**: PVCs without the `instance` label are still associated with a release when a workload's pod template references them (`persistentVolumeClaim.claimName`), when they follow a StatefulSet `volumeClaimTemplates` naming pattern, or when they carry an owner reference to a Helm-managed workload. For any remaining case (e.g. operator-managed PVCs), label the PVC with `pvcguardian.io/release: <release-name>` (configurable via `selectors.releaseLabel`) to attach it explicitly.
+2. **Missing `app.kubernetes.io/instance` Label**: PVCs without the `instance` label are still associated with a release when a workload's pod template references them (`persistentVolumeClaim.claimName`), when they follow a StatefulSet `volumeClaimTemplates` naming pattern, or when they carry an owner reference to a Helm-managed workload. For any remaining case (e.g. operator-managed PVCs), label the PVC with `pvcguardian.io/release: <release-name>` to attach it explicitly.
 
 ---
 

@@ -84,7 +84,7 @@ func (b *ScheduleBuilder) ResolvePreset(annotatedPreset string) string {
 	if annotatedPreset != "" && b.cfg.HasPreset(annotatedPreset) {
 		return annotatedPreset
 	}
-	return b.cfg.Selectors.DefaultPreset
+	return b.cfg.Discovery.DefaultPreset
 }
 
 // CalculateCron computes the deterministic cron expression (and slot representation)
@@ -189,7 +189,7 @@ func (b *ScheduleBuilder) BuildSchedule(rel k8s.DiscoveredRelease) (*velerov1.Sc
 					},
 					{
 						MatchLabels: map[string]string{
-							b.cfg.Selectors.ReleaseLabel: rel.Name,
+							k8s.ReleaseLabel: rel.Name,
 						},
 					},
 				},

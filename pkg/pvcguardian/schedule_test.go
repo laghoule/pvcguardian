@@ -44,7 +44,7 @@ func TestDeterministicHashAndName(t *testing.T) {
 
 func TestResolvePreset(t *testing.T) {
 	cfg := config.DefaultConfig()
-	cfg.Selectors.DefaultPreset = "evening"
+	cfg.Discovery.DefaultPreset = "evening"
 
 	builder := NewScheduleBuilder(&cfg)
 

@@ -52,12 +52,9 @@ The following table lists the configurable parameters of the chart and their def
 | `securityContext.readOnlyRootFilesystem` | Mount root filesystem read-only | `true` |
 | `securityContext.allowPrivilegeEscalation` | Prohibit privilege escalation | `false` |
 | `resources` | CPU/Memory resource requests and limits | `{}` |
-| `config.selectors.label` | Opt-in label key (expects `"true"`) | `pvcguardian.io/enabled` |
-| `config.selectors.presetAnnotation` | Workload annotation key to choose preset | `pvcguardian.io/preset` |
-| `config.selectors.releaseLabel` | PVC label key used to associate a PVC with a release | `pvcguardian.io/release` |
-| `config.selectors.requirePVC` | Only schedule releases having at least 1 PVC | `true` |
-| `config.selectors.defaultPreset` | Fallback schedule preset name | `evening` |
-| `config.selectors.excludeNamespaces` | Namespaces ignored by discovery scan | `["kube-system"]` |
+| `config.discovery.requirePVC` | Only schedule releases having at least 1 PVC | `true` |
+| `config.discovery.defaultPreset` | Fallback schedule preset name | `evening` |
+| `config.discovery.excludeNamespaces` | Namespaces ignored by discovery scan | `["kube-system"]` |
 | `config.velero.namespace` | Namespace where Velero and its Schedules reside | `velero` |
 | `config.velero.storageLocation` | Velero BackupStorageLocation (empty = Velero default) | `""` |
 | `config.velero.defaultVolumesToFsBackup` | Use Kopia filesystem backup for all volumes | `true` |

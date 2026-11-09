@@ -105,24 +105,12 @@
     "affinity": { "type": "object" },
     "config": {
       "type": "object",
-      "required": ["selectors", "velero", "schedules", "reconcile", "logging", "metrics"],
+      "required": ["discovery", "velero", "schedules", "reconcile", "logging", "metrics"],
       "properties": {
-        "selectors": {
+        "discovery": {
           "type": "object",
-          "required": ["label", "presetAnnotation", "requirePVC", "defaultPreset"],
+          "required": ["requirePVC", "defaultPreset"],
           "properties": {
-            "label": {
-              "type": "string",
-              "minLength": 1
-            },
-            "presetAnnotation": {
-              "type": "string",
-              "minLength": 1
-            },
-            "releaseLabel": {
-              "type": "string",
-              "minLength": 1
-            },
             "requirePVC": {
               "type": "boolean"
             },

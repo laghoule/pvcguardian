@@ -13,17 +13,11 @@ func TestDefaultConfig(t *testing.T) {
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("DefaultConfig should be valid: %v", err)
 	}
-	if cfg.Selectors.Label != "pvcguardian.io/enabled" {
-		t.Errorf("unexpected default label: %s", cfg.Selectors.Label)
-	}
-	if cfg.Selectors.ReleaseLabel != "pvcguardian.io/release" {
-		t.Errorf("unexpected default release label: %s", cfg.Selectors.ReleaseLabel)
-	}
-	if !cfg.Selectors.RequirePVC {
+	if !cfg.Discovery.RequirePVC {
 		t.Errorf("expected requirePVC to default to true")
 	}
-	if cfg.Selectors.DefaultPreset != "evening" {
-		t.Errorf("expected defaultPreset evening, got %s", cfg.Selectors.DefaultPreset)
+	if cfg.Discovery.DefaultPreset != "evening" {
+		t.Errorf("expected defaultPreset evening, got %s", cfg.Discovery.DefaultPreset)
 	}
 	if cfg.Schedules.Timezone != "UTC" {
 		t.Errorf("expected timezone UTC, got %s", cfg.Schedules.Timezone)
@@ -62,10 +56,7 @@ func TestLoadValidYaml(t *testing.T) {
 	cfgFile := filepath.Join(tmp, "config.yaml")
 
 	yamlContent := `
-selectors:
-  label: mybackup.io/enabled
-  presetAnnotation: mybackup.io/preset
-  releaseLabel: mybackup.io/release
+discovery:
   requirePVC: false
   defaultPreset: day
   excludeNamespaces:
@@ -113,13 +104,7 @@ metrics:
 		t.Fatalf("Load returned unexpected error: %v", err)
 	}
 
-	if cfg.Selectors.Label != "mybackup.io/enabled" {
-		t.Errorf("expected custom label, got %s", cfg.Selectors.Label)
-	}
-	if cfg.Selectors.ReleaseLabel != "mybackup.io/release" {
-		t.Errorf("expected custom release label, got %s", cfg.Selectors.ReleaseLabel)
-	}
-	if cfg.Selectors.RequirePVC != false {
+	if cfg.Discovery.RequirePVC != false {
 		t.Errorf("expected requirePVC false")
 	}
 	if cfg.Velero.StorageLocation != "s3-backups" {
@@ -139,21 +124,9 @@ func TestInvalidConfigFailsValidation(t *testing.T) {
 		mutator func(c *Config)
 	}{
 		{
-			name: "empty label",
-			mutator: func(c *Config) {
-				c.Selectors.Label = ""
-			},
-		},
-		{
-			name: "empty release label",
-			mutator: func(c *Config) {
-				c.Selectors.ReleaseLabel = ""
-			},
-		},
-		{
 			name: "unknown defaultPreset",
 			mutator: func(c *Config) {
-				c.Selectors.DefaultPreset = "nonexistent"
+				c.Discovery.DefaultPreset = "nonexistent"
 			},
 		},
 		{
