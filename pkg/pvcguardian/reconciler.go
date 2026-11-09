@@ -39,17 +39,13 @@ type ReconcileResult struct {
 }
 
 // NewReconciler creates a Reconciler.
-func NewReconciler(
-	cfg *config.Config,
-	configPath string,
-	discovery *k8s.Discovery,
-	veleroClient k8s.VeleroClient,
-	recorder record.EventRecorder,
-	logger *slog.Logger,
-) *Reconciler {
+func NewReconciler(cfg *config.Config, configPath string, discovery *k8s.Discovery,
+	veleroClient k8s.VeleroClient, recorder record.EventRecorder, logger *slog.Logger) *Reconciler {
+
 	if logger == nil {
 		logger = slog.Default()
 	}
+
 	return &Reconciler{
 		cfg:          cfg,
 		configPath:   configPath,
@@ -66,6 +62,7 @@ func (r *Reconciler) reloadConfig() {
 	if r.configPath == "" {
 		return
 	}
+
 	newCfg, err := config.Load(r.configPath)
 	if err != nil {
 		r.logger.Error("Failed to reload configuration from file, keeping existing config",
@@ -73,6 +70,7 @@ func (r *Reconciler) reloadConfig() {
 			"error", err)
 		return
 	}
+
 	r.cfg = newCfg
 	r.builder = NewScheduleBuilder(newCfg)
 	r.logger.Debug("Configuration reloaded successfully")
@@ -245,18 +243,23 @@ func (r *Reconciler) needsUpdate(existing, desired *velerov1.Schedule) bool {
 	if existing.Spec.Schedule != desired.Spec.Schedule {
 		return true
 	}
+
 	if existing.Spec.Template.TTL != desired.Spec.Template.TTL {
 		return true
 	}
+
 	if existing.Spec.Template.StorageLocation != desired.Spec.Template.StorageLocation {
 		return true
 	}
+
 	if existing.Annotations[PresetAnno] != desired.Annotations[PresetAnno] {
 		return true
 	}
+
 	if !reflect.DeepEqual(existing.Spec.Template.IncludedNamespaces, desired.Spec.Template.IncludedNamespaces) {
 		return true
 	}
+
 	return false
 }
 
