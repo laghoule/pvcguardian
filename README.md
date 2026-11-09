@@ -35,9 +35,6 @@ selectors:
   defaultPreset: evening                   # Default preset applied to opted-in releases
   excludeNamespaces:                       # Namespaces excluded from discovery
     - kube-system
-  namespaces:                              # Optional per-namespace default preset fallback
-    staging: day
-    prod: evening
 
 velero:
   namespace: velero

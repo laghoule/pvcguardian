@@ -53,12 +53,11 @@ func parseHHMM(s string) (int, error) {
 
 // SelectorsConfig controls how releases are selected for backup.
 type SelectorsConfig struct {
-	Label             string            `yaml:"label"`             // default "pvcguardian.io/enabled"
-	PresetAnnotation  string            `yaml:"presetAnnotation"`  // default "pvcguardian.io/preset"
-	RequirePVC        bool              `yaml:"requirePVC"`        // default true
-	DefaultPreset     string            `yaml:"defaultPreset"`     // default "evening"
-	ExcludeNamespaces []string          `yaml:"excludeNamespaces"` // default [kube-system, kube-public, kube-node-lease, velero, pvcguardian]
-	Namespaces        map[string]string `yaml:"namespaces"`        // namespace -> preset
+	Label             string   `yaml:"label"`             // default "pvcguardian.io/enabled"
+	PresetAnnotation  string   `yaml:"presetAnnotation"`  // default "pvcguardian.io/preset"
+	RequirePVC        bool     `yaml:"requirePVC"`        // default true
+	DefaultPreset     string   `yaml:"defaultPreset"`     // default "evening"
+	ExcludeNamespaces []string `yaml:"excludeNamespaces"` // default [kube-system]
 }
 
 // VeleroConfig holds Velero destination parameters.
@@ -114,7 +113,6 @@ func DefaultConfig() Config {
 			ExcludeNamespaces: []string{
 				"kube-system",
 			},
-			Namespaces: make(map[string]string),
 		},
 		Velero: VeleroConfig{
 			Namespace:                "velero",
@@ -177,13 +175,6 @@ func (c *Config) Validate() error {
 	// Validate defaultPreset exists in windows or custom cron
 	if !c.HasPreset(c.Selectors.DefaultPreset) {
 		return fmt.Errorf("selectors.defaultPreset %q is not defined in schedules.windows or schedules.cron", c.Selectors.DefaultPreset)
-	}
-
-	// Validate namespace presets
-	for ns, preset := range c.Selectors.Namespaces {
-		if !c.HasPreset(preset) {
-			return fmt.Errorf("selectors.namespaces[%s] references unknown preset %q", ns, preset)
-		}
 	}
 
 	// Validate windows

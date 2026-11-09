@@ -57,7 +57,6 @@ The following table lists the configurable parameters of the chart and their def
 | `config.selectors.requirePVC` | Only schedule releases having at least 1 PVC | `true` |
 | `config.selectors.defaultPreset` | Fallback schedule preset name | `evening` |
 | `config.selectors.excludeNamespaces` | Namespaces ignored by discovery scan | `["kube-system"]` |
-| `config.selectors.namespaces` | Map of namespace name to default preset | `{}` |
 | `config.velero.namespace` | Namespace where Velero and its Schedules reside | `velero` |
 | `config.velero.storageLocation` | Velero BackupStorageLocation (empty = Velero default) | `""` |
 | `config.velero.defaultVolumesToFsBackup` | Use Kopia filesystem backup for all volumes | `true` |

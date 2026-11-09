@@ -67,8 +67,6 @@ selectors:
   excludeNamespaces:
     - kube-system
     - custom-ignore
-  namespaces:
-    prod: night
 
 velero:
   namespace: velero-custom
@@ -117,9 +115,6 @@ metrics:
 	if cfg.Selectors.RequirePVC != false {
 		t.Errorf("expected requirePVC false")
 	}
-	if cfg.Selectors.Namespaces["prod"] != "night" {
-		t.Errorf("expected prod namespace to map to night")
-	}
 	if cfg.Velero.StorageLocation != "s3-backups" {
 		t.Errorf("expected s3-backups storage location")
 	}
@@ -146,12 +141,6 @@ func TestInvalidConfigFailsValidation(t *testing.T) {
 			name: "unknown defaultPreset",
 			mutator: func(c *Config) {
 				c.Selectors.DefaultPreset = "nonexistent"
-			},
-		},
-		{
-			name: "unknown namespace preset",
-			mutator: func(c *Config) {
-				c.Selectors.Namespaces["prod"] = "unknown"
 			},
 		},
 		{

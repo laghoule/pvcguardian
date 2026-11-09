@@ -131,12 +131,6 @@
               "items": {
                 "type": "string"
               }
-            },
-            "namespaces": {
-              "type": "object",
-              "additionalProperties": {
-                "type": "string"
-              }
             }
           }
         },

@@ -51,7 +51,6 @@ config:
     defaultPreset: evening
     excludeNamespaces:
       - kube-system
-    namespaces: {}
 
   velero:
     namespace: velero

@@ -45,20 +45,19 @@ func TestDeterministicHashAndName(t *testing.T) {
 func TestResolvePreset(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Selectors.DefaultPreset = "evening"
-	cfg.Selectors.Namespaces["staging"] = "day"
 
 	builder := NewScheduleBuilder(&cfg)
 
 	// Annotation takes precedence
-	if p := builder.ResolvePreset("staging", "night"); p != "night" {
+	if p := builder.ResolvePreset("night"); p != "night" {
 		t.Errorf("expected night from annotation, got %s", p)
 	}
-	// Fallback to namespace preset
-	if p := builder.ResolvePreset("staging", ""); p != "day" {
-		t.Errorf("expected day, got %s", p)
+	// Unknown annotation falls back to default preset
+	if p := builder.ResolvePreset("unknown"); p != "evening" {
+		t.Errorf("expected evening, got %s", p)
 	}
 	// Fallback to default preset
-	if p := builder.ResolvePreset("prod", ""); p != "evening" {
+	if p := builder.ResolvePreset(""); p != "evening" {
 		t.Errorf("expected evening, got %s", p)
 	}
 }
