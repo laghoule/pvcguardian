@@ -1,0 +1,40 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard",
+    ":semanticCommits"
+  ],
+  "labels": ["dependencies"],
+  "schedule": ["before 6am on monday"],
+  "timezone": "UTC",
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 2,
+  "packageRules": [
+    {
+      "description": "Group Go minor and patch updates together",
+      "matchManagers": ["gomod"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "Go dependencies"
+    },
+    {
+      "description": "Keep Kubernetes client-go and related packages aligned together",
+      "matchPackagePrefixes": ["k8s.io/", "sigs.k8s.io/"],
+      "groupName": "Kubernetes libraries"
+    },
+    {
+      "description": "Group GitHub Actions updates",
+      "matchManagers": ["github-actions"],
+      "groupName": "GitHub Actions"
+    },
+    {
+      "description": "Group Dockerfile base images updates",
+      "matchManagers": ["dockerfile"],
+      "groupName": "Docker images"
+    }
+  ],
+  "customManagers": [],
+  "postUpdateOptions": [
+    "gomodTidy"
+  ]
+}
