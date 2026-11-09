@@ -29,13 +29,13 @@ type Reconciler struct {
 
 // ReconcileResult summarizes the outcome of one reconciliation cycle.
 type ReconcileResult struct {
-	OptInNamespaces   int
+	OptInNamespaces    int
 	DiscoveredReleases int
-	CreatedSchedules  int
-	UpdatedSchedules  int
-	DeletedSchedules  int
-	SkippedReleases   int
-	UncoveredPVCs     int
+	CreatedSchedules   int
+	UpdatedSchedules   int
+	DeletedSchedules   int
+	SkippedReleases    int
+	UncoveredPVCs      int
 }
 
 // NewReconciler creates a Reconciler.
