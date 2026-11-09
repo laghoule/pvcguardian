@@ -21,11 +21,12 @@ const (
 
 // DiscoveredRelease represents an identified Helm release.
 type DiscoveredRelease struct {
-	Namespace string
-	Name      string
-	Chart     string
-	PVCs      []string // PVC names belonging to this release
-	OptOut    bool     // true if explicitly opted out via label="false"
+	Namespace        string
+	Name             string
+	Chart            string
+	PVCs             []string // PVC names belonging to this release
+	OptIn            bool     // true if explicitly opted in via label="true"
+	AnnotatedPreset  string   // preset specified in pvcguardian.io/preset annotation
 }
 
 // Discovery holds context and clients needed to scan workloads and PVCs.
@@ -45,35 +46,39 @@ func NewDiscovery(client kubernetes.Interface, logger *slog.Logger) *Discovery {
 	}
 }
 
-// FindOptInNamespaces lists namespaces with optInLabel == "true".
-func (d *Discovery) FindOptInNamespaces(ctx context.Context, optInLabel string) ([]string, error) {
+// ListScannableNamespaces returns all cluster namespaces except those in excluded list.
+func (d *Discovery) ListScannableNamespaces(ctx context.Context, excluded []string) ([]string, error) {
 	nsList, err := d.kubeClient.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("listing namespaces: %w", err)
 	}
 
-	var optedIn []string
+	excludeMap := make(map[string]bool)
+	for _, ex := range excluded {
+		excludeMap[strings.TrimSpace(ex)] = true
+	}
+
+	var scannable []string
 	for _, ns := range nsList.Items {
-		val, exists := ns.Labels[optInLabel]
-		if exists && strings.EqualFold(strings.TrimSpace(val), "true") {
-			optedIn = append(optedIn, ns.Name)
+		if !excludeMap[ns.Name] {
+			scannable = append(scannable, ns.Name)
 		}
 	}
-	sort.Strings(optedIn)
-	return optedIn, nil
+	sort.Strings(scannable)
+	return scannable, nil
 }
 
 // DiscoverReleases scans workloads in a namespace and associates their PVCs.
-func (d *Discovery) DiscoverReleases(ctx context.Context, namespace string, optInLabel string) ([]DiscoveredRelease, []string, error) {
-	// 1. Identify releases from Deployments, StatefulSets, DaemonSets, CronJobs, Jobs
+func (d *Discovery) DiscoverReleases(ctx context.Context, namespace, optInLabel, presetAnnotation string) ([]DiscoveredRelease, []string, error) {
 	type releaseMeta struct {
 		chart  string
-		optOut bool
+		optIn  bool
+		preset string
 	}
 	releases := make(map[string]*releaseMeta)
 	unlabeledCount := 0
 
-	recordWorkload := func(kind, name string, labels map[string]string) {
+	recordWorkload := func(kind, name string, labels, annotations map[string]string) {
 		if labels == nil {
 			return
 		}
@@ -102,8 +107,14 @@ func (d *Discovery) DiscoverReleases(ctx context.Context, namespace string, optI
 		}
 
 		if val, ok := labels[optInLabel]; ok {
-			if strings.EqualFold(strings.TrimSpace(val), "false") {
-				rm.optOut = true
+			if strings.EqualFold(strings.TrimSpace(val), "true") {
+				rm.optIn = true
+			}
+		}
+
+		if annotations != nil && rm.preset == "" {
+			if p, ok := annotations[presetAnnotation]; ok {
+				rm.preset = strings.TrimSpace(p)
 			}
 		}
 	}
@@ -113,7 +124,7 @@ func (d *Discovery) DiscoverReleases(ctx context.Context, namespace string, optI
 		return nil, nil, fmt.Errorf("listing deployments in %s: %w", namespace, err)
 	}
 	for _, item := range deps.Items {
-		recordWorkload("Deployment", item.Name, item.Labels)
+		recordWorkload("Deployment", item.Name, item.Labels, item.Annotations)
 	}
 
 	sts, err := d.kubeClient.AppsV1().StatefulSets(namespace).List(ctx, metav1.ListOptions{})
@@ -121,7 +132,7 @@ func (d *Discovery) DiscoverReleases(ctx context.Context, namespace string, optI
 		return nil, nil, fmt.Errorf("listing statefulsets in %s: %w", namespace, err)
 	}
 	for _, item := range sts.Items {
-		recordWorkload("StatefulSet", item.Name, item.Labels)
+		recordWorkload("StatefulSet", item.Name, item.Labels, item.Annotations)
 	}
 
 	ds, err := d.kubeClient.AppsV1().DaemonSets(namespace).List(ctx, metav1.ListOptions{})
@@ -129,7 +140,7 @@ func (d *Discovery) DiscoverReleases(ctx context.Context, namespace string, optI
 		return nil, nil, fmt.Errorf("listing daemonsets in %s: %w", namespace, err)
 	}
 	for _, item := range ds.Items {
-		recordWorkload("DaemonSet", item.Name, item.Labels)
+		recordWorkload("DaemonSet", item.Name, item.Labels, item.Annotations)
 	}
 
 	cjs, err := d.kubeClient.BatchV1().CronJobs(namespace).List(ctx, metav1.ListOptions{})
@@ -137,7 +148,7 @@ func (d *Discovery) DiscoverReleases(ctx context.Context, namespace string, optI
 		return nil, nil, fmt.Errorf("listing cronjobs in %s: %w", namespace, err)
 	}
 	for _, item := range cjs.Items {
-		recordWorkload("CronJob", item.Name, item.Labels)
+		recordWorkload("CronJob", item.Name, item.Labels, item.Annotations)
 	}
 
 	jobs, err := d.kubeClient.BatchV1().Jobs(namespace).List(ctx, metav1.ListOptions{})
@@ -145,7 +156,7 @@ func (d *Discovery) DiscoverReleases(ctx context.Context, namespace string, optI
 		return nil, nil, fmt.Errorf("listing jobs in %s: %w", namespace, err)
 	}
 	for _, item := range jobs.Items {
-		recordWorkload("Job", item.Name, item.Labels)
+		recordWorkload("Job", item.Name, item.Labels, item.Annotations)
 	}
 
 	pvcList, err := d.kubeClient.CoreV1().PersistentVolumeClaims(namespace).List(ctx, metav1.ListOptions{})
@@ -170,11 +181,12 @@ func (d *Discovery) DiscoverReleases(ctx context.Context, namespace string, optI
 		pvcs := pvcByRelease[name]
 		sort.Strings(pvcs)
 		result = append(result, DiscoveredRelease{
-			Namespace: namespace,
-			Name:      name,
-			Chart:     meta.chart,
-			PVCs:      pvcs,
-			OptOut:    meta.optOut,
+			Namespace:       namespace,
+			Name:            name,
+			Chart:           meta.chart,
+			PVCs:            pvcs,
+			OptIn:           meta.optIn,
+			AnnotatedPreset: meta.preset,
 		})
 	}
 

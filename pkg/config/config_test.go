@@ -61,14 +61,14 @@ func TestLoadValidYaml(t *testing.T) {
 	yamlContent := `
 selectors:
   label: mybackup.io/enabled
+  presetAnnotation: mybackup.io/preset
   requirePVC: false
   defaultPreset: day
+  excludeNamespaces:
+    - kube-system
+    - custom-ignore
   namespaces:
     prod: night
-  releases:
-    - namespace: prod
-      name: critical-db
-      preset: weekly
 
 velero:
   namespace: velero-custom

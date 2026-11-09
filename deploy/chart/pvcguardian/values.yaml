@@ -3,6 +3,7 @@ replicaCount: 1
 image:
   repository: ghcr.io/laghoule/pvcguardian
   pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
   tag: ""
 
 imagePullSecrets: []
@@ -30,13 +31,13 @@ securityContext:
     drop:
       - ALL
 
-resources:
-  limits:
-    cpu: 200m
-    memory: 256Mi
-  requests:
-    cpu: 50m
-    memory: 64Mi
+resources: {}
+  # limits:
+  #   cpu: 200m
+  #   memory: 256Mi
+  # requests:
+  #   cpu: 50m
+  #   memory: 64Mi
 
 nodeSelector: {}
 tolerations: []
@@ -45,10 +46,12 @@ affinity: {}
 config:
   selectors:
     label: pvcguardian.io/enabled
+    presetAnnotation: pvcguardian.io/preset
     requirePVC: true
     defaultPreset: evening
+    excludeNamespaces:
+      - kube-system
     namespaces: {}
-    releases: []
 
   velero:
     namespace: velero
@@ -80,6 +83,22 @@ config:
   metrics:
     enabled: true
     addr: ":8080"
+
+podMonitor:
+  enabled: false
+  namespace: "" # defaults to release namespace
+  interval: "30s"
+  scrapeTimeout: "10s"
+  labels: {}
+  annotations: {}
+  metricRelabelings: []
+  relabelings: []
+
+prometheusRule:
+  enabled: false
+  namespace: "" # defaults to release namespace
+  labels: {}
+  annotations: {}
 
 dashboard:
   enabled: true

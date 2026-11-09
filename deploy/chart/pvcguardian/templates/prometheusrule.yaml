@@ -1,0 +1,46 @@
+{{- if and .Values.config.metrics.enabled .Values.prometheusRule.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "pvcguardian.fullname" . }}
+  namespace: {{ default .Release.Namespace .Values.prometheusRule.namespace }}
+  labels:
+    {{- include "pvcguardian.labels" . | nindent 4 }}
+    {{- with .Values.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with .Values.prometheusRule.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  groups:
+    - name: pvcguardian.rules
+      rules:
+        - alert: PVCGuardianReconcileErrors
+          expr: increase(pvcguardian_reconcile_total{result="error"}[1h]) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "PVCGuardian reconciliation errors detected"
+            description: "PVCGuardian has failed {{ `{{ $value }}` }} reconciliation cycles in the last hour."
+
+        - alert: PVCGuardianUncoveredPVCs
+          expr: pvcguardian_uncovered_pvcs > 0
+          for: 30m
+          labels:
+            severity: info
+          annotations:
+            summary: "PVCs not covered by any Helm release"
+            description: "There are {{ `{{ $value }}` }} PersistentVolumeClaims in opted-in namespaces that are not covered by any Velero schedule."
+
+        - alert: PVCGuardianUnlabeledWorkloads
+          expr: increase(pvcguardian_unlabeled_helm_workloads[1h]) > 0
+          for: 15m
+          labels:
+            severity: info
+          annotations:
+            summary: "Helm workloads missing instance label"
+            description: "Workloads managed by Helm are missing the app.kubernetes.io/instance label and cannot be backed up."
+{{- end }}

@@ -12,35 +12,16 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 )
 
-func TestFindOptInNamespaces(t *testing.T) {
+func TestListScannableNamespaces(t *testing.T) {
 	client := fake.NewSimpleClientset(
-		&corev1.Namespace{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:   "prod",
-				Labels: map[string]string{"pvcguardian.io/enabled": "true"},
-			},
-		},
-		&corev1.Namespace{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:   "staging",
-				Labels: map[string]string{"pvcguardian.io/enabled": "TRUE"}, // case-insensitive
-			},
-		},
-		&corev1.Namespace{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:   "kube-system",
-				Labels: map[string]string{"pvcguardian.io/enabled": "false"},
-			},
-		},
-		&corev1.Namespace{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "default",
-			},
-		},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "prod"}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "staging"}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "kube-system"}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "velero"}},
 	)
 
 	discovery := NewDiscovery(client, nil)
-	ns, err := discovery.FindOptInNamespaces(context.Background(), "pvcguardian.io/enabled")
+	ns, err := discovery.ListScannableNamespaces(context.Background(), []string{"kube-system", "velero"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -52,39 +33,43 @@ func TestFindOptInNamespaces(t *testing.T) {
 
 func TestDiscoverReleasesAndUncoveredPVCs(t *testing.T) {
 	client := fake.NewSimpleClientset(
-		// Deployment for release "app-a"
+		// Deployment for release "app-a" opted-in with preset annotation
 		&appsv1.Deployment{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "app-a-web",
 				Namespace: "prod",
 				Labels: map[string]string{
-					HelmManagedByLabel: "Helm",
-					HelmInstanceLabel:  "app-a",
-					HelmChartLabel:     "app-a-1.2.3",
+					HelmManagedByLabel:       "Helm",
+					HelmInstanceLabel:        "app-a",
+					HelmChartLabel:           "app-a-1.2.3",
+					"pvcguardian.io/enabled": "true",
+				},
+				Annotations: map[string]string{
+					"pvcguardian.io/preset": "night",
 				},
 			},
 		},
-		// StatefulSet for release "app-b"
+		// StatefulSet for release "app-b" opted-in
 		&appsv1.StatefulSet{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "app-b-db",
 				Namespace: "prod",
 				Labels: map[string]string{
-					HelmManagedByLabel: "Helm",
-					HelmInstanceLabel:  "app-b",
-					HelmChartLabel:     "app-b-0.5.0",
+					HelmManagedByLabel:       "Helm",
+					HelmInstanceLabel:        "app-b",
+					HelmChartLabel:           "app-b-0.5.0",
+					"pvcguardian.io/enabled": "true",
 				},
 			},
 		},
-		// CronJob for release "app-c" opted-out
+		// CronJob for release "app-c" NOT opted-in (missing label)
 		&batchv1.CronJob{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "app-c-cron",
 				Namespace: "prod",
 				Labels: map[string]string{
-					HelmManagedByLabel:       "Helm",
-					HelmInstanceLabel:        "app-c",
-					"pvcguardian.io/enabled": "false",
+					HelmManagedByLabel: "Helm",
+					HelmInstanceLabel:  "app-c",
 				},
 			},
 		},
@@ -118,7 +103,7 @@ func TestDiscoverReleasesAndUncoveredPVCs(t *testing.T) {
 	)
 
 	discovery := NewDiscovery(client, nil)
-	releases, uncovered, err := discovery.DiscoverReleases(context.Background(), "prod", "pvcguardian.io/enabled")
+	releases, uncovered, err := discovery.DiscoverReleases(context.Background(), "prod", "pvcguardian.io/enabled", "pvcguardian.io/preset")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -127,13 +112,16 @@ func TestDiscoverReleasesAndUncoveredPVCs(t *testing.T) {
 		t.Fatalf("expected 3 releases, got %d", len(releases))
 	}
 
-	// app-a has 1 PVC
+	// app-a has 1 PVC and night preset
 	relA := findRelease(releases, "app-a")
 	if relA == nil || len(relA.PVCs) != 1 || relA.PVCs[0] != "data-app-a" {
 		t.Errorf("expected app-a with data-app-a, got %+v", relA)
 	}
-	if relA.OptOut {
-		t.Errorf("app-a should not be opted out")
+	if !relA.OptIn {
+		t.Errorf("app-a should be opted in")
+	}
+	if relA.AnnotatedPreset != "night" {
+		t.Errorf("expected night preset annotation, got %s", relA.AnnotatedPreset)
 	}
 
 	// app-b has 0 PVCs
@@ -142,10 +130,10 @@ func TestDiscoverReleasesAndUncoveredPVCs(t *testing.T) {
 		t.Errorf("expected app-b with 0 PVCs, got %+v", relB)
 	}
 
-	// app-c is opted out
+	// app-c is NOT opted in
 	relC := findRelease(releases, "app-c")
-	if relC == nil || !relC.OptOut {
-		t.Errorf("expected app-c to be opted out")
+	if relC == nil || relC.OptIn {
+		t.Errorf("expected app-c to NOT be opted in")
 	}
 
 	// Uncovered PVCs must contain manual-pvc

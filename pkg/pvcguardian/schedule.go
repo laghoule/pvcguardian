@@ -78,14 +78,12 @@ func sanitizeK8sName(s string) string {
 }
 
 // ResolvePreset determines the preset name for a release following the precedence:
-// 1. Release override
-// 2. Namespace preset
+// 1. Release workload annotation (pvcguardian.io/preset)
+// 2. Namespace preset configuration
 // 3. Default preset
-func (b *ScheduleBuilder) ResolvePreset(namespace, release string) string {
-	for _, ro := range b.cfg.Selectors.Releases {
-		if ro.Namespace == namespace && ro.Name == release && ro.Preset != "" {
-			return ro.Preset
-		}
+func (b *ScheduleBuilder) ResolvePreset(namespace, annotatedPreset string) string {
+	if annotatedPreset != "" && b.cfg.HasPreset(annotatedPreset) {
+		return annotatedPreset
 	}
 	if p, ok := b.cfg.Selectors.Namespaces[namespace]; ok && p != "" {
 		return p
@@ -144,7 +142,7 @@ func fromHex(c byte) uint32 {
 
 // BuildSchedule constructs a complete Velero Schedule CR.
 func (b *ScheduleBuilder) BuildSchedule(rel k8s.DiscoveredRelease) (*velerov1.Schedule, error) {
-	preset := b.ResolvePreset(rel.Namespace, rel.Name)
+	preset := b.ResolvePreset(rel.Namespace, rel.AnnotatedPreset)
 	cronExpr, slot, err := b.CalculateCron(rel.Namespace, rel.Name, preset)
 	if err != nil {
 		return nil, fmt.Errorf("calculating cron for %s/%s: %w", rel.Namespace, rel.Name, err)

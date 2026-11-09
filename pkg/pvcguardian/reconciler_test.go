@@ -16,14 +16,14 @@ import (
 )
 
 func TestReconcileOnceCreatesAndDeletesOrphans(t *testing.T) {
-	// 1. Setup K8s state with one opt-in namespace 'prod'
-	// 'app-with-pvc' has PVC -> schedule created
-	// 'app-no-pvc' has no PVC -> skipped (requirePVC=true)
+	// 1. Setup K8s state with two releases:
+	// 'app-with-pvc' is opted-in with label and has PVC -> schedule created
+	// 'app-no-pvc' is opted-in but has no PVC -> skipped (requirePVC=true)
+	// 'app-not-opted-in' has PVC but no opt-in label -> skipped
 	kubeClient := fake.NewSimpleClientset(
 		&corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:   "prod",
-				Labels: map[string]string{"pvcguardian.io/enabled": "true"},
+				Name: "prod",
 			},
 		},
 		&appsv1.Deployment{
@@ -31,8 +31,9 @@ func TestReconcileOnceCreatesAndDeletesOrphans(t *testing.T) {
 				Name:      "web-deploy",
 				Namespace: "prod",
 				Labels: map[string]string{
-					k8s.HelmManagedByLabel: "Helm",
-					k8s.HelmInstanceLabel:  "app-with-pvc",
+					k8s.HelmManagedByLabel:   "Helm",
+					k8s.HelmInstanceLabel:    "app-with-pvc",
+					"pvcguardian.io/enabled": "true",
 				},
 			},
 		},
@@ -50,8 +51,9 @@ func TestReconcileOnceCreatesAndDeletesOrphans(t *testing.T) {
 				Name:      "stateless-deploy",
 				Namespace: "prod",
 				Labels: map[string]string{
-					k8s.HelmManagedByLabel: "Helm",
-					k8s.HelmInstanceLabel:  "app-no-pvc",
+					k8s.HelmManagedByLabel:   "Helm",
+					k8s.HelmInstanceLabel:    "app-no-pvc",
+					"pvcguardian.io/enabled": "true",
 				},
 			},
 		},
@@ -118,8 +120,7 @@ func TestReconcileUpdatesOnConfigChange(t *testing.T) {
 	kubeClient := fake.NewSimpleClientset(
 		&corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:   "prod",
-				Labels: map[string]string{"pvcguardian.io/enabled": "true"},
+				Name: "prod",
 			},
 		},
 		&appsv1.Deployment{
@@ -127,8 +128,9 @@ func TestReconcileUpdatesOnConfigChange(t *testing.T) {
 				Name:      "web-deploy",
 				Namespace: "prod",
 				Labels: map[string]string{
-					k8s.HelmManagedByLabel: "Helm",
-					k8s.HelmInstanceLabel:  "app-a",
+					k8s.HelmManagedByLabel:   "Helm",
+					k8s.HelmInstanceLabel:    "app-a",
+					"pvcguardian.io/enabled": "true",
 				},
 			},
 		},

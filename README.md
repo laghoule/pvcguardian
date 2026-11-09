@@ -8,8 +8,10 @@
 
 - **Helm Workload Discovery**: Detects releases via standard Helm labels (`app.kubernetes.io/managed-by=Helm` and `app.kubernetes.io/instance`) across Deployments, StatefulSets, DaemonSets, CronJobs, and Jobs without requiring cluster-wide access to Kubernetes Secrets.
 - **Opt-in Control**:
-  - Namespace-level: label `pvcguardian.io/enabled: "true"` enables all releases in that namespace.
-  - Release-level override: label `pvcguardian.io/enabled: "false"` on any workload explicitly opts out that release.
+  - Scanning is cluster-wide by default across all namespaces (excluding `kube-system`).
+  - Releases explicitly opt in by applying the label `pvcguardian.io/enabled: "true"` on their workloads (Deployment, StatefulSet, DaemonSet, CronJob, Job).
+- **Custom Schedule Presets via Annotations**:
+  - A release can choose its schedule window by simply adding the annotation `pvcguardian.io/preset: "night"` on its workload, without altering the daemon's configuration.
 - **Stateless Release Filtering**: `requirePVC: true` skips releases that have no associated Persistent Volume Claims, preventing empty backup schedules.
 - **Deterministic Time-Window Spreading**:
   - Presets define daily windows (`day`: 10:00-16:00, `evening`: 20:00-23:00, `night`: 01:00-04:00, all in UTC).
@@ -27,16 +29,15 @@
 
 ```yaml
 selectors:
-  label: pvcguardian.io/enabled      # Opt-in label key (expects "true" or "false")
-  requirePVC: true                   # Skip releases without PVCs
-  defaultPreset: evening             # Default preset applied to releases
-  namespaces:                        # Per-namespace preset override
+  label: pvcguardian.io/enabled            # Opt-in label key (expects "true")
+  presetAnnotation: pvcguardian.io/preset  # Workload annotation to select preset (e.g. "night")
+  requirePVC: true                         # Skip releases without PVCs
+  defaultPreset: evening                   # Default preset applied to opted-in releases
+  excludeNamespaces:                       # Namespaces excluded from discovery
+    - kube-system
+  namespaces:                              # Optional per-namespace default preset fallback
     staging: day
     prod: evening
-  releases:                          # Per-release override
-    - namespace: prod
-      name: critical-database
-      preset: night
 
 velero:
   namespace: velero

@@ -88,18 +88,18 @@ func (r *Reconciler) ReconcileOnce(ctx context.Context) (*ReconcileResult, error
 
 	r.logger.Info("Starting reconciliation cycle", "optInLabel", r.cfg.Selectors.Label)
 
-	namespaces, err := r.discovery.FindOptInNamespaces(ctx, r.cfg.Selectors.Label)
+	namespaces, err := r.discovery.ListScannableNamespaces(ctx, r.cfg.Selectors.ExcludeNamespaces)
 	if err != nil {
-		return nil, fmt.Errorf("discovering opt-in namespaces: %w", err)
+		return nil, fmt.Errorf("listing scannable namespaces: %w", err)
 	}
 	result.OptInNamespaces = len(namespaces)
-	r.logger.Info("Discovered opt-in namespaces", "count", len(namespaces), "namespaces", namespaces)
+	r.logger.Info("Scannable namespaces identified", "count", len(namespaces), "namespaces", namespaces)
 
 	desiredSchedules := make(map[string]*velerov1.Schedule)
 	totalUncovered := 0
 
 	for _, ns := range namespaces {
-		releases, uncovered, err := r.discovery.DiscoverReleases(ctx, ns, r.cfg.Selectors.Label)
+		releases, uncovered, err := r.discovery.DiscoverReleases(ctx, ns, r.cfg.Selectors.Label, r.cfg.Selectors.PresetAnnotation)
 		if err != nil {
 			r.logger.Error("Failed to discover releases in namespace", "namespace", ns, "error", err)
 			continue
@@ -116,8 +116,9 @@ func (r *Reconciler) ReconcileOnce(ctx context.Context) (*ReconcileResult, error
 		}
 
 		for _, rel := range releases {
-			if rel.OptOut {
-				r.logger.Info("Skipping release due to explicit opt-out label",
+			// Require explicit opt-in label on the release
+			if !rel.OptIn {
+				r.logger.Debug("Skipping release without opt-in label",
 					"namespace", ns, "release", rel.Name)
 				result.SkippedReleases++
 				continue

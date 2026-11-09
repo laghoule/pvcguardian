@@ -51,15 +51,13 @@ The following table lists the configurable parameters of the chart and their def
 | `podSecurityContext.runAsUser` | Non-root UID | `65532` |
 | `securityContext.readOnlyRootFilesystem` | Mount root filesystem read-only | `true` |
 | `securityContext.allowPrivilegeEscalation` | Prohibit privilege escalation | `false` |
-| `resources.limits.cpu` | CPU limit | `200m` |
-| `resources.limits.memory` | Memory limit | `256Mi` |
-| `resources.requests.cpu` | CPU request | `50m` |
-| `resources.requests.memory` | Memory request | `64Mi` |
-| `config.selectors.label` | Opt-in label key (expects `"true"` / `"false"`) | `pvcguardian.io/enabled` |
+| `resources` | CPU/Memory resource requests and limits | `{}` |
+| `config.selectors.label` | Opt-in label key (expects `"true"`) | `pvcguardian.io/enabled` |
+| `config.selectors.presetAnnotation` | Workload annotation key to choose preset | `pvcguardian.io/preset` |
 | `config.selectors.requirePVC` | Only schedule releases having at least 1 PVC | `true` |
 | `config.selectors.defaultPreset` | Fallback schedule preset name | `evening` |
-| `config.selectors.namespaces` | Map of namespace name to preset override | `{}` |
-| `config.selectors.releases` | List of release overrides (`namespace`, `name`, `preset`) | `[]` |
+| `config.selectors.excludeNamespaces` | Namespaces ignored by discovery scan | `["kube-system"]` |
+| `config.selectors.namespaces` | Map of namespace name to default preset | `{}` |
 | `config.velero.namespace` | Namespace where Velero and its Schedules reside | `velero` |
 | `config.velero.storageLocation` | Velero BackupStorageLocation (empty = Velero default) | `""` |
 | `config.velero.defaultVolumesToFsBackup` | Use Kopia filesystem backup for all volumes | `true` |
@@ -77,6 +75,12 @@ The following table lists the configurable parameters of the chart and their def
 | `config.logging.format` | Logging format (`json`, `text`) | `json` |
 | `config.metrics.enabled` | Enable Prometheus metrics endpoint | `true` |
 | `config.metrics.addr` | Listening address for `/metrics` and `/healthz` | `:8080` |
+| `podMonitor.enabled` | Create Prometheus Operator PodMonitor | `false` |
+| `podMonitor.namespace` | PodMonitor namespace (default: release namespace) | `""` |
+| `podMonitor.interval` | Scrape interval | `30s` |
+| `podMonitor.scrapeTimeout` | Scrape timeout | `10s` |
+| `prometheusRule.enabled` | Create Prometheus Operator alerting rules | `false` |
+| `prometheusRule.namespace` | PrometheusRule namespace (default: release namespace) | `""` |
 | `dashboard.enabled` | Deploy Grafana dashboard ConfigMap | `true` |
 | `dashboard.namespace` | Target namespace for the dashboard ConfigMap | `""` (release namespace) |
 | `dashboard.labels` | Labels for Grafana sidecar autodiscovery (`grafana_dashboard: "1"`) | `{ grafana_dashboard: "1" }` |
@@ -85,16 +89,20 @@ The following table lists the configurable parameters of the chart and their def
 
 ## Usage Example
 
-### 1. Activate backup on a namespace
+### 1. Opt-in a Helm release for backup
+
+Add the label on the release workload (Deployment, StatefulSet, DaemonSet, CronJob, Job):
 
 ```bash
-kubectl label namespace production pvcguardian.io/enabled="true"
+kubectl label deployment my-app -n production pvcguardian.io/enabled="true"
 ```
 
-### 2. Exclude a specific release in that namespace
+### 2. Customize the schedule preset on the workload
+
+To use another preset (e.g. `night` or `day` instead of `evening`):
 
 ```bash
-kubectl label deployment my-stateless-app -n production pvcguardian.io/enabled="false"
+kubectl annotate deployment my-app -n production pvcguardian.io/preset="night"
 ```
 
 ### 3. Check generated Velero Schedules

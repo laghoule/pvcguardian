@@ -46,22 +46,19 @@ func TestResolvePreset(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Selectors.DefaultPreset = "evening"
 	cfg.Selectors.Namespaces["staging"] = "day"
-	cfg.Selectors.Releases = []config.ReleaseOverride{
-		{Namespace: "staging", Name: "critical-db", Preset: "night"},
-	}
 
 	builder := NewScheduleBuilder(&cfg)
 
-	// Release override
-	if p := builder.ResolvePreset("staging", "critical-db"); p != "night" {
-		t.Errorf("expected night, got %s", p)
+	// Annotation takes precedence
+	if p := builder.ResolvePreset("staging", "night"); p != "night" {
+		t.Errorf("expected night from annotation, got %s", p)
 	}
-	// Namespace preset
-	if p := builder.ResolvePreset("staging", "other-app"); p != "day" {
+	// Fallback to namespace preset
+	if p := builder.ResolvePreset("staging", ""); p != "day" {
 		t.Errorf("expected day, got %s", p)
 	}
-	// Default preset
-	if p := builder.ResolvePreset("prod", "any-app"); p != "evening" {
+	// Fallback to default preset
+	if p := builder.ResolvePreset("prod", ""); p != "evening" {
 		t.Errorf("expected evening, got %s", p)
 	}
 }

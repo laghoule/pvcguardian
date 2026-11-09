@@ -27,7 +27,8 @@
           "enum": ["Always", "IfNotPresent", "Never"]
         },
         "tag": {
-          "type": "string"
+          "type": "string",
+          "description": "Overrides the image tag whose default is the chart appVersion."
         }
       }
     },
@@ -108,9 +109,13 @@
       "properties": {
         "selectors": {
           "type": "object",
-          "required": ["label", "requirePVC", "defaultPreset"],
+          "required": ["label", "presetAnnotation", "requirePVC", "defaultPreset"],
           "properties": {
             "label": {
+              "type": "string",
+              "minLength": 1
+            },
+            "presetAnnotation": {
               "type": "string",
               "minLength": 1
             },
@@ -121,22 +126,16 @@
               "type": "string",
               "minLength": 1
             },
+            "excludeNamespaces": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "namespaces": {
               "type": "object",
               "additionalProperties": {
                 "type": "string"
-              }
-            },
-            "releases": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "required": ["namespace", "name", "preset"],
-                "properties": {
-                  "namespace": { "type": "string", "minLength": 1 },
-                  "name": { "type": "string", "minLength": 1 },
-                  "preset": { "type": "string", "minLength": 1 }
-                }
               }
             }
           }
@@ -236,6 +235,30 @@
             }
           }
         }
+      }
+    },
+    "podMonitor": {
+      "type": "object",
+      "required": ["enabled"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "namespace": { "type": "string" },
+        "interval": { "type": "string" },
+        "scrapeTimeout": { "type": "string" },
+        "labels": { "type": "object" },
+        "annotations": { "type": "object" },
+        "metricRelabelings": { "type": "array" },
+        "relabelings": { "type": "array" }
+      }
+    },
+    "prometheusRule": {
+      "type": "object",
+      "required": ["enabled"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "namespace": { "type": "string" },
+        "labels": { "type": "object" },
+        "annotations": { "type": "object" }
       }
     },
     "dashboard": {

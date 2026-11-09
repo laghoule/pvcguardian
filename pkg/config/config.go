@@ -51,20 +51,14 @@ func parseHHMM(s string) (int, error) {
 	return h*60 + m, nil
 }
 
-// ReleaseOverride sets specific schedule preset on a release.
-type ReleaseOverride struct {
-	Namespace string `yaml:"namespace"`
-	Name      string `yaml:"name"`
-	Preset    string `yaml:"preset"`
-}
-
 // SelectorsConfig controls how releases are selected for backup.
 type SelectorsConfig struct {
-	Label         string            `yaml:"label"`         // default "pvcguardian.io/enabled"
-	RequirePVC    bool              `yaml:"requirePVC"`    // default true
-	DefaultPreset string            `yaml:"defaultPreset"` // default "evening"
-	Namespaces    map[string]string `yaml:"namespaces"`    // namespace -> preset
-	Releases      []ReleaseOverride `yaml:"releases"`
+	Label             string            `yaml:"label"`             // default "pvcguardian.io/enabled"
+	PresetAnnotation  string            `yaml:"presetAnnotation"`  // default "pvcguardian.io/preset"
+	RequirePVC        bool              `yaml:"requirePVC"`        // default true
+	DefaultPreset     string            `yaml:"defaultPreset"`     // default "evening"
+	ExcludeNamespaces []string          `yaml:"excludeNamespaces"` // default [kube-system, kube-public, kube-node-lease, velero, pvcguardian]
+	Namespaces        map[string]string `yaml:"namespaces"`        // namespace -> preset
 }
 
 // VeleroConfig holds Velero destination parameters.
@@ -113,11 +107,14 @@ type Config struct {
 func DefaultConfig() Config {
 	return Config{
 		Selectors: SelectorsConfig{
-			Label:         "pvcguardian.io/enabled",
-			RequirePVC:    true,
-			DefaultPreset: "evening",
-			Namespaces:    make(map[string]string),
-			Releases:      nil,
+			Label:            "pvcguardian.io/enabled",
+			PresetAnnotation: "pvcguardian.io/preset",
+			RequirePVC:       true,
+			DefaultPreset:    "evening",
+			ExcludeNamespaces: []string{
+				"kube-system",
+			},
+			Namespaces: make(map[string]string),
 		},
 		Velero: VeleroConfig{
 			Namespace:                "velero",
@@ -186,16 +183,6 @@ func (c *Config) Validate() error {
 	for ns, preset := range c.Selectors.Namespaces {
 		if !c.HasPreset(preset) {
 			return fmt.Errorf("selectors.namespaces[%s] references unknown preset %q", ns, preset)
-		}
-	}
-
-	// Validate release overrides
-	for _, rel := range c.Selectors.Releases {
-		if strings.TrimSpace(rel.Namespace) == "" || strings.TrimSpace(rel.Name) == "" {
-			return fmt.Errorf("release override must define both namespace and name")
-		}
-		if !c.HasPreset(rel.Preset) {
-			return fmt.Errorf("release override for %s/%s references unknown preset %q", rel.Namespace, rel.Name, rel.Preset)
 		}
 	}
 
