@@ -21,7 +21,6 @@ type Metrics struct {
 	SchedulesManaged         prometheus.Gauge
 	ReleasesSkippedTotal     *prometheus.CounterVec
 	UncoveredPVCs            prometheus.Gauge
-	UnlabeledHelmWorkloads   prometheus.Counter
 	registry                 *prometheus.Registry
 	server                   *http.Server
 }
@@ -65,12 +64,6 @@ func NewMetrics() *Metrics {
 				Help: "Number of PVCs in opt-in namespaces that are not covered by any Helm release.",
 			},
 		),
-		UnlabeledHelmWorkloads: prometheus.NewCounter(
-			prometheus.CounterOpts{
-				Name: "pvcguardian_unlabeled_helm_workloads",
-				Help: "Total workloads marked managed-by=Helm but missing instance label.",
-			},
-		),
 	}
 
 	reg.MustRegister(
@@ -79,7 +72,6 @@ func NewMetrics() *Metrics {
 		m.SchedulesManaged,
 		m.ReleasesSkippedTotal,
 		m.UncoveredPVCs,
-		m.UnlabeledHelmWorkloads,
 	)
 
 	return m

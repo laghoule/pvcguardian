@@ -55,6 +55,7 @@ func parseHHMM(s string) (int, error) {
 type SelectorsConfig struct {
 	Label             string   `yaml:"label"`             // default "pvcguardian.io/enabled"
 	PresetAnnotation  string   `yaml:"presetAnnotation"`  // default "pvcguardian.io/preset"
+	ReleaseLabel      string   `yaml:"releaseLabel"`      // default "pvcguardian.io/release"
 	RequirePVC        bool     `yaml:"requirePVC"`        // default true
 	DefaultPreset     string   `yaml:"defaultPreset"`     // default "evening"
 	ExcludeNamespaces []string `yaml:"excludeNamespaces"` // default [kube-system]
@@ -108,6 +109,7 @@ func DefaultConfig() Config {
 		Selectors: SelectorsConfig{
 			Label:            "pvcguardian.io/enabled",
 			PresetAnnotation: "pvcguardian.io/preset",
+			ReleaseLabel:     "pvcguardian.io/release",
 			RequirePVC:       true,
 			DefaultPreset:    "evening",
 			ExcludeNamespaces: []string{
@@ -170,6 +172,10 @@ func Load(path string) (*Config, error) {
 func (c *Config) Validate() error {
 	if strings.TrimSpace(c.Selectors.Label) == "" {
 		return fmt.Errorf("selectors.label cannot be empty")
+	}
+
+	if strings.TrimSpace(c.Selectors.ReleaseLabel) == "" {
+		return fmt.Errorf("selectors.releaseLabel cannot be empty")
 	}
 
 	// Validate defaultPreset exists in windows or custom cron

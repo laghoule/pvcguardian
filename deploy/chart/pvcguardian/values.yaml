@@ -47,6 +47,7 @@ config:
   selectors:
     label: pvcguardian.io/enabled
     presetAnnotation: pvcguardian.io/preset
+    releaseLabel: pvcguardian.io/release
     requirePVC: true
     defaultPreset: evening
     excludeNamespaces:

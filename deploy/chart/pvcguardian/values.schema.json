@@ -119,6 +119,10 @@
               "type": "string",
               "minLength": 1
             },
+            "releaseLabel": {
+              "type": "string",
+              "minLength": 1
+            },
             "requirePVC": {
               "type": "boolean"
             },

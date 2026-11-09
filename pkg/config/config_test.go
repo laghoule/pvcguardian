@@ -16,6 +16,9 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Selectors.Label != "pvcguardian.io/enabled" {
 		t.Errorf("unexpected default label: %s", cfg.Selectors.Label)
 	}
+	if cfg.Selectors.ReleaseLabel != "pvcguardian.io/release" {
+		t.Errorf("unexpected default release label: %s", cfg.Selectors.ReleaseLabel)
+	}
 	if !cfg.Selectors.RequirePVC {
 		t.Errorf("expected requirePVC to default to true")
 	}
@@ -62,6 +65,7 @@ func TestLoadValidYaml(t *testing.T) {
 selectors:
   label: mybackup.io/enabled
   presetAnnotation: mybackup.io/preset
+  releaseLabel: mybackup.io/release
   requirePVC: false
   defaultPreset: day
   excludeNamespaces:
@@ -112,6 +116,9 @@ metrics:
 	if cfg.Selectors.Label != "mybackup.io/enabled" {
 		t.Errorf("expected custom label, got %s", cfg.Selectors.Label)
 	}
+	if cfg.Selectors.ReleaseLabel != "mybackup.io/release" {
+		t.Errorf("expected custom release label, got %s", cfg.Selectors.ReleaseLabel)
+	}
 	if cfg.Selectors.RequirePVC != false {
 		t.Errorf("expected requirePVC false")
 	}
@@ -128,13 +135,19 @@ metrics:
 
 func TestInvalidConfigFailsValidation(t *testing.T) {
 	cases := []struct {
-		name   string
+		name    string
 		mutator func(c *Config)
 	}{
 		{
 			name: "empty label",
 			mutator: func(c *Config) {
 				c.Selectors.Label = ""
+			},
+		},
+		{
+			name: "empty release label",
+			mutator: func(c *Config) {
+				c.Selectors.ReleaseLabel = ""
 			},
 		},
 		{

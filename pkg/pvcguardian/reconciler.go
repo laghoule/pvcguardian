@@ -97,7 +97,7 @@ func (r *Reconciler) ReconcileOnce(ctx context.Context) (*ReconcileResult, error
 	totalUncovered := 0
 
 	for _, ns := range namespaces {
-		releases, uncovered, err := r.discovery.DiscoverReleases(ctx, ns, r.cfg.Selectors.Label, r.cfg.Selectors.PresetAnnotation)
+		releases, uncovered, err := r.discovery.DiscoverReleases(ctx, ns, r.cfg.Selectors.Label, r.cfg.Selectors.PresetAnnotation, r.cfg.Selectors.ReleaseLabel)
 		if err != nil {
 			r.logger.Error("Failed to discover releases in namespace", "namespace", ns, "error", err)
 			continue

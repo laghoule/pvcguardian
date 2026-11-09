@@ -147,8 +147,14 @@ func TestBuildSchedule(t *testing.T) {
 	if len(sch.Spec.Template.IncludedNamespaces) != 1 || sch.Spec.Template.IncludedNamespaces[0] != "prod" {
 		t.Errorf("expected includedNamespaces [prod], got %v", sch.Spec.Template.IncludedNamespaces)
 	}
-	if len(sch.Spec.Template.OrLabelSelectors) != 1 || sch.Spec.Template.OrLabelSelectors[0].MatchLabels[k8s.HelmInstanceLabel] != "web-server" {
+	if len(sch.Spec.Template.OrLabelSelectors) != 2 {
+		t.Fatalf("expected 2 orLabelSelectors, got %d", len(sch.Spec.Template.OrLabelSelectors))
+	}
+	if sch.Spec.Template.OrLabelSelectors[0].MatchLabels[k8s.HelmInstanceLabel] != "web-server" {
 		t.Errorf("expected orLabelSelectors instance=web-server")
+	}
+	if sch.Spec.Template.OrLabelSelectors[1].MatchLabels["pvcguardian.io/release"] != "web-server" {
+		t.Errorf("expected orLabelSelectors pvcguardian.io/release=web-server")
 	}
 	if *sch.Spec.Template.DefaultVolumesToFsBackup != true {
 		t.Errorf("expected DefaultVolumesToFsBackup to be true")

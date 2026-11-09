@@ -16,8 +16,8 @@ func TestMetricsObserveAndServer(t *testing.T) {
 	res := &ReconcileResult{
 		CreatedSchedules: 2,
 		DeletedSchedules: 0,
-		SkippedReleases:   1,
-		UncoveredPVCs:     3,
+		SkippedReleases:  1,
+		UncoveredPVCs:    3,
 	}
 	m.ObserveCycle(150*time.Millisecond, res, nil)
 

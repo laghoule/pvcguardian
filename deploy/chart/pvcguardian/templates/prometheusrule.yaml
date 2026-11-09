@@ -34,13 +34,4 @@ spec:
           annotations:
             summary: "PVCs not covered by any Helm release"
             description: "There are {{ `{{ $value }}` }} PersistentVolumeClaims in opted-in namespaces that are not covered by any Velero schedule."
-
-        - alert: PVCGuardianUnlabeledWorkloads
-          expr: increase(pvcguardian_unlabeled_helm_workloads[1h]) > 0
-          for: 15m
-          labels:
-            severity: info
-          annotations:
-            summary: "Helm workloads missing instance label"
-            description: "Workloads managed by Helm are missing the app.kubernetes.io/instance label and cannot be backed up."
 {{- end }}

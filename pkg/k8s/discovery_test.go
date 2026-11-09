@@ -103,7 +103,7 @@ func TestDiscoverReleasesAndUncoveredPVCs(t *testing.T) {
 	)
 
 	discovery := NewDiscovery(client, nil)
-	releases, uncovered, err := discovery.DiscoverReleases(context.Background(), "prod", "pvcguardian.io/enabled", "pvcguardian.io/preset")
+	releases, uncovered, err := discovery.DiscoverReleases(context.Background(), "prod", "pvcguardian.io/enabled", "pvcguardian.io/preset", "pvcguardian.io/release")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -139,6 +139,136 @@ func TestDiscoverReleasesAndUncoveredPVCs(t *testing.T) {
 	// Uncovered PVCs must contain manual-pvc
 	if len(uncovered) != 1 || uncovered[0] != "manual-pvc" {
 		t.Fatalf("expected [manual-pvc], got %v", uncovered)
+	}
+}
+
+func TestDiscoverReleasesViaWorkloadVolumesAndOwnerReferences(t *testing.T) {
+	client := fake.NewSimpleClientset(
+		&appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "app-d-web",
+				Namespace: "prod",
+				UID:       "uid-app-d-web",
+				Labels: map[string]string{
+					HelmManagedByLabel:       "Helm",
+					HelmInstanceLabel:        "app-d",
+					"pvcguardian.io/enabled": "true",
+				},
+			},
+			Spec: appsv1.DeploymentSpec{
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Volumes: []corev1.Volume{{
+							Name: "data",
+							VolumeSource: corev1.VolumeSource{
+								PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "shared-data"},
+							},
+						}},
+					},
+				},
+			},
+		},
+		&appsv1.StatefulSet{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "app-b-db",
+				Namespace: "prod",
+				UID:       "uid-app-b-db",
+				Labels: map[string]string{
+					HelmManagedByLabel:       "Helm",
+					HelmInstanceLabel:        "app-b",
+					"pvcguardian.io/enabled": "true",
+				},
+			},
+			Spec: appsv1.StatefulSetSpec{
+				VolumeClaimTemplates: []corev1.PersistentVolumeClaim{{
+					ObjectMeta: metav1.ObjectMeta{Name: "data"},
+				}},
+			},
+		},
+		// Referenced by app-d's pod template but without the instance label.
+		&corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{Name: "shared-data", Namespace: "prod"},
+		},
+		// Generated from app-b's volumeClaimTemplate, without the instance label.
+		&corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{Name: "data-app-b-db-0", Namespace: "prod"},
+		},
+		// Owned by app-d's Deployment, without the instance label.
+		&corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "owned-pvc",
+				Namespace: "prod",
+				OwnerReferences: []metav1.OwnerReference{{
+					Kind: "Deployment",
+					Name: "app-d-web",
+					UID:  "uid-app-d-web",
+				}},
+			},
+		},
+		// Unrelated PVC with a similar StatefulSet-like name.
+		&corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{Name: "data-app-b-db-cache", Namespace: "prod"},
+		},
+		// Explicitly associated with app-b through the release label.
+		&corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "labeled-orphan",
+				Namespace: "prod",
+				Labels:    map[string]string{"pvcguardian.io/release": "app-b"},
+			},
+		},
+		// Release label pointing to a release that does not exist.
+		&corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "bad-ref-pvc",
+				Namespace: "prod",
+				Labels:    map[string]string{"pvcguardian.io/release": "ghost"},
+			},
+		},
+		&corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{Name: "manual-pvc", Namespace: "prod"},
+		},
+	)
+
+	discovery := NewDiscovery(client, nil)
+	releases, uncovered, err := discovery.DiscoverReleases(context.Background(), "prod", "pvcguardian.io/enabled", "pvcguardian.io/preset", "pvcguardian.io/release")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	relB := findRelease(releases, "app-b")
+	wantB := []string{"data-app-b-db-0", "labeled-orphan"}
+	if relB == nil || len(relB.PVCs) != len(wantB) {
+		t.Fatalf("expected app-b with %v, got %+v", wantB, relB)
+	}
+	for i := range wantB {
+		if relB.PVCs[i] != wantB[i] {
+			t.Errorf("expected app-b with %v, got %v", wantB, relB.PVCs)
+		}
+	}
+
+	relD := findRelease(releases, "app-d")
+	if relD == nil {
+		t.Fatalf("expected app-d release")
+	}
+	want := []string{"owned-pvc", "shared-data"}
+	if len(relD.PVCs) != len(want) {
+		t.Fatalf("expected app-d PVCs %v, got %v", want, relD.PVCs)
+	}
+	for i := range want {
+		if relD.PVCs[i] != want[i] {
+			t.Errorf("expected app-d PVCs %v, got %v", want, relD.PVCs)
+		}
+	}
+
+	wantUncovered := []string{"bad-ref-pvc", "data-app-b-db-cache", "manual-pvc"}
+	if len(uncovered) != len(wantUncovered) {
+		t.Fatalf("expected uncovered %v, got %v", wantUncovered, uncovered)
+	}
+	for i := range wantUncovered {
+		if uncovered[i] != wantUncovered[i] {
+			t.Errorf("expected uncovered %v, got %v", wantUncovered, uncovered)
+		}
 	}
 }
 

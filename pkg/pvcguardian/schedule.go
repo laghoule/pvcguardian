@@ -187,6 +187,11 @@ func (b *ScheduleBuilder) BuildSchedule(rel k8s.DiscoveredRelease) (*velerov1.Sc
 							k8s.HelmInstanceLabel: rel.Name,
 						},
 					},
+					{
+						MatchLabels: map[string]string{
+							b.cfg.Selectors.ReleaseLabel: rel.Name,
+						},
+					},
 				},
 				TTL:                      metav1.Duration{Duration: ttl},
 				DefaultVolumesToFsBackup: &defaultFsBackup,
