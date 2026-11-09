@@ -6,9 +6,9 @@ This Helm chart installs **PVCGuardian**, an automated Kubernetes daemon that di
 
 ## Prerequisites
 
-- Kubernetes 1.24+
-- Helm v3.8.0+
-- [Velero](https://velero.io) deployed in the cluster with CRD `schedules.velero.io` installed
+- Kubernetes 1.26+ (aligned with supported versions for Velero v1.18+)
+- Helm v3.8.0+ (required for `values.schema.json` validation support)
+- [Velero](https://velero.io) v1.15+ deployed in the cluster with CRD `schedules.velero.io` installed
 
 ---
 
