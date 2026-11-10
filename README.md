@@ -90,6 +90,25 @@ helm install pvcguardian deploy/chart/pvcguardian \
 
 ---
 
+## Release Process
+
+`deploy/chart/pvcguardian/Chart.yaml` is the single source of truth. Keep `version` and `appVersion` identical and bump both, then push to `main`:
+
+```yaml
+version: 0.2.2
+appVersion: "0.2.2"
+```
+
+On push, `.github/workflows/build-binary.yaml` resolves `v<appVersion>` and, when that tag does not exist yet:
+
+1. builds the multi-arch binaries and publishes them on a GitHub Release tagged `v<appVersion>`;
+2. pushes the container image to GHCR with the `v<appVersion>`, `<appVersion>`, `<major>.<minor>` and `latest` tags;
+3. `.github/workflows/release-chart.yaml` packages and publishes the chart as `pvcguardian-<version>`.
+
+A push without a version bump only rebuilds artifacts (no tag, no release). Re-running the workflow manually with an explicit `tag` input republishes that tag.
+
+---
+
 ## Prometheus Metrics
 
 | Metric | Type | Description |

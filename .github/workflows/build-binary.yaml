@@ -21,6 +21,55 @@ permissions:
   packages: write
 
 jobs:
+  version:
+    name: Resolve Release Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      release: ${{ steps.resolve.outputs.release }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Resolve Version
+        id: resolve
+        run: |
+          set -euo pipefail
+
+          CHART_FILE="deploy/chart/pvcguardian/Chart.yaml"
+          CHART_VERSION="$(awk -F': *' '/^version:/{gsub(/"/,"",$2); print $2}' "${CHART_FILE}" | tr -d '[:space:]')"
+          APP_VERSION="$(awk -F': *' '/^appVersion:/{gsub(/"/,"",$2); print $2}' "${CHART_FILE}" | tr -d '[:space:]')"
+
+          if [[ -z "${APP_VERSION}" ]]; then
+            echo "::error::Unable to read appVersion from ${CHART_FILE}"
+            exit 1
+          fi
+          if [[ "${CHART_VERSION}" != "${APP_VERSION}" ]]; then
+            echo "::warning::Chart version (${CHART_VERSION}) differs from appVersion (${APP_VERSION})"
+          fi
+
+          RELEASE="false"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ github.event.inputs.tag }}" ]]; then
+            VERSION="${{ github.event.inputs.tag }}"
+            RELEASE="true"
+          elif [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF_NAME}"
+            RELEASE="true"
+          elif [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            VERSION="dev-$(git rev-parse --short HEAD)"
+          else
+            VERSION="v${APP_VERSION}"
+            if git ls-remote --exit-code --tags origin "refs/tags/${VERSION}" >/dev/null 2>&1; then
+              echo "Tag ${VERSION} already exists, no release needed"
+            else
+              echo "Tag ${VERSION} does not exist, a release will be published"
+              RELEASE="true"
+            fi
+          fi
+
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "release=${RELEASE}" >> "${GITHUB_OUTPUT}"
+
   test:
     name: Run Tests & Vet
     runs-on: ubuntu-latest
@@ -42,7 +91,7 @@ jobs:
 
   build-binary:
     name: Compile Multi-Arch Binaries
-    needs: test
+    needs: [test, version]
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -68,14 +117,7 @@ jobs:
       - name: Set Version Metadata
         id: meta
         run: |
-          VERSION="${{ github.event.inputs.tag }}"
-          if [[ -z "${VERSION}" ]]; then
-            VERSION="${GITHUB_REF_NAME}"
-            if [[ ! "${GITHUB_REF}" =~ ^refs/tags/ ]]; then
-              VERSION="dev-$(git rev-parse --short HEAD)"
-            fi
-          fi
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "version=${{ needs.version.outputs.version }}" >> "$GITHUB_OUTPUT"
           echo "commit=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
           echo "date=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> "$GITHUB_OUTPUT"
 
@@ -102,8 +144,8 @@ jobs:
 
   release:
     name: Publish GitHub Release
-    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.tag != '')
-    needs: build-binary
+    if: needs.version.outputs.release == 'true'
+    needs: [version, build-binary]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -119,7 +161,7 @@ jobs:
       - name: Upload Binaries to Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          tag_name: ${{ needs.version.outputs.version }}
           target_commitish: ${{ github.sha }}
           files: release-assets/*
         env:
@@ -127,7 +169,7 @@ jobs:
 
   docker:
     name: Build & Push Container Image to GHCR
-    needs: test
+    needs: [test, version]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -146,16 +188,20 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Set Build Date
+        id: date
+        run: echo "date=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> "$GITHUB_OUTPUT"
+
       - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag != '' }}
-            type=semver,pattern={{version}},value=${{ github.event.inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag != '' }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ github.event.inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag != '' }}
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') || github.event.inputs.tag != '' }}
+            type=raw,value=${{ needs.version.outputs.version }},enable=${{ needs.version.outputs.release == 'true' }}
+            type=semver,pattern={{version}},value=${{ needs.version.outputs.version }},enable=${{ needs.version.outputs.release == 'true' }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.version.outputs.version }},enable=${{ needs.version.outputs.release == 'true' }}
+            type=raw,value=latest,enable=${{ needs.version.outputs.release == 'true' }}
             type=semver,pattern={{version}}
             type=semver,pattern=v{{version}}
             type=semver,pattern={{major}}.{{minor}}
@@ -173,6 +219,6 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            VERSION=${{ github.event.inputs.tag || github.ref_name }}
+            VERSION=${{ needs.version.outputs.version }}
             COMMIT=${{ github.sha }}
-            DATE=${{ steps.meta.outputs.date }}
+            DATE=${{ steps.date.outputs.date }}
