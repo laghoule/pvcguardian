@@ -42,7 +42,7 @@ The following table lists the configurable parameters of the chart and their def
 |---|---|---|
 | `replicaCount` | Number of PVCGuardian daemon replicas (runs as active/active or single instance) | `1` |
 | `image.repository` | Image repository | `ghcr.io/laghoule/pvcguardian` |
-| `image.tag` | Image tag (defaults to `Chart.appVersion`) | `""` |
+| `image.tag` | Image tag (defaults to `v` + `Chart.appVersion`) | `""` |
 | `image.pullPolicy` | Image pull policy | `IfNotPresent` |
 | `imagePullSecrets` | Secrets for private image registries | `[]` |
 | `serviceAccount.create` | Create dedicated ServiceAccount | `true` |

@@ -28,7 +28,7 @@
         },
         "tag": {
           "type": "string",
-          "description": "Overrides the image tag whose default is the chart appVersion."
+          "description": "Overrides the image tag whose default is \"v\" + the chart appVersion."
         }
       }
     },
