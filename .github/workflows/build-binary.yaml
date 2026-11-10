@@ -95,6 +95,7 @@ jobs:
 
   build-binary:
     name: Compile Multi-Arch Binaries
+    if: needs.version.outputs.release == 'true'
     needs: [test, version]
     runs-on: ubuntu-latest
     permissions:
@@ -182,6 +183,7 @@ jobs:
 
   docker:
     name: Build & Push Container Image to GHCR
+    if: needs.version.outputs.release == 'true'
     needs: [test, version]
     runs-on: ubuntu-latest
     permissions:
