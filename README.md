@@ -102,7 +102,7 @@ appVersion: "0.2.2"
 On push, `.github/workflows/build-binary.yaml` resolves `v<appVersion>` and, when that tag does not exist yet:
 
 1. builds the multi-arch binaries and publishes them on a GitHub Release tagged `v<appVersion>`;
-2. pushes the container image to GHCR with the `v<appVersion>`, `<appVersion>`, `<major>.<minor>` and `latest` tags;
+2. pushes the container image to GHCR with the `v<appVersion>`, `<appVersion>` and `latest` tags;
 3. `.github/workflows/release-chart.yaml` packages and publishes the chart as `pvcguardian-<version>`.
 
 A push without a version bump only runs tests and code verification (no binary compilation, no image push, no release). Re-running the workflow manually with an explicit `tag` input republishes that tag.

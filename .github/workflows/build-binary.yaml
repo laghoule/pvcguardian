@@ -217,12 +217,9 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=raw,value=${{ needs.version.outputs.version }},enable=${{ needs.version.outputs.release == 'true' }}
-            type=semver,pattern={{version}},value=${{ needs.version.outputs.version }},enable=${{ needs.version.outputs.release == 'true' }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ needs.version.outputs.version }},enable=${{ needs.version.outputs.release == 'true' }}
-            type=raw,value=latest,enable=${{ needs.version.outputs.release == 'true' }}
-            type=ref,event=branch
-            type=sha,format=short
+            type=raw,value=${{ needs.version.outputs.version }}
+            type=semver,pattern={{version}},value=${{ needs.version.outputs.version }}
+            type=raw,value=latest
 
       - name: Build and Push Docker Image
         uses: docker/build-push-action@v6
