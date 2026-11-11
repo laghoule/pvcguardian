@@ -103,7 +103,7 @@ func TestDiscoverReleasesAndUncoveredPVCs(t *testing.T) {
 	)
 
 	discovery := NewDiscovery(client, nil)
-	releases, uncovered, err := discovery.DiscoverReleases(context.Background(), "prod")
+	releases, uncovered, _, err := discovery.DiscoverReleases(context.Background(), "prod")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -231,7 +231,7 @@ func TestDiscoverReleasesViaWorkloadVolumesAndOwnerReferences(t *testing.T) {
 	)
 
 	discovery := NewDiscovery(client, nil)
-	releases, uncovered, err := discovery.DiscoverReleases(context.Background(), "prod")
+	releases, uncovered, _, err := discovery.DiscoverReleases(context.Background(), "prod")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -315,7 +315,7 @@ func TestDiscoverReleasesSelectorUnit(t *testing.T) {
 		},
 	)
 
-	releases, uncovered, err := NewDiscovery(client, nil).DiscoverReleases(context.Background(), "prod")
+	releases, uncovered, _, err := NewDiscovery(client, nil).DiscoverReleases(context.Background(), "prod")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -395,9 +395,13 @@ func TestDiscoverReleasesSelectorErrors(t *testing.T) {
 		},
 	)
 
-	releases, uncovered, err := NewDiscovery(client, nil).DiscoverReleases(context.Background(), "prod")
+	releases, uncovered, conflicts, err := NewDiscovery(client, nil).DiscoverReleases(context.Background(), "prod")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if conflicts != 1 {
+		t.Errorf("expected 1 conflicting unit, got %d", conflicts)
 	}
 
 	if len(releases) != 0 {
@@ -405,6 +409,102 @@ func TestDiscoverReleasesSelectorErrors(t *testing.T) {
 	}
 	if len(uncovered) != 1 || uncovered[0] != "conflict-pvc" {
 		t.Errorf("expected uncovered [conflict-pvc], got %v", uncovered)
+	}
+}
+
+func TestDiscoverReleasesDetectsPresetConflict(t *testing.T) {
+	client := fake.NewSimpleClientset(
+		&appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "web",
+				Namespace: "prod",
+				Labels: map[string]string{
+					HelmManagedByLabel: HelmManagedByValue,
+					HelmInstanceLabel:  "app-x",
+					OptInLabel:         "true",
+				},
+				Annotations: map[string]string{
+					PresetAnnotation: "day",
+				},
+			},
+		},
+		&appsv1.StatefulSet{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "db",
+				Namespace: "prod",
+				Labels: map[string]string{
+					HelmManagedByLabel: HelmManagedByValue,
+					HelmInstanceLabel:  "app-x",
+					OptInLabel:         "true",
+				},
+				Annotations: map[string]string{
+					PresetAnnotation: "night",
+				},
+			},
+		},
+		&corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "data-db",
+				Namespace: "prod",
+				Labels: map[string]string{
+					HelmInstanceLabel: "app-x",
+				},
+			},
+		},
+	)
+
+	releases, uncovered, conflicts, err := NewDiscovery(client, nil).DiscoverReleases(context.Background(), "prod")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if conflicts != 1 {
+		t.Errorf("expected 1 conflict for preset mismatch, got %d", conflicts)
+	}
+	if len(releases) != 0 {
+		t.Fatalf("expected unit app-x to be skipped due to conflict, got %d releases", len(releases))
+	}
+	if len(uncovered) != 1 || uncovered[0] != "data-db" {
+		t.Errorf("expected data-db in uncovered PVCs, got %v", uncovered)
+	}
+}
+
+func TestDiscoverReleasesDetectsOptInConflict(t *testing.T) {
+	client := fake.NewSimpleClientset(
+		&appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "web",
+				Namespace: "prod",
+				Labels: map[string]string{
+					HelmManagedByLabel: HelmManagedByValue,
+					HelmInstanceLabel:  "app-y",
+					OptInLabel:         "true",
+				},
+			},
+		},
+		&appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "worker",
+				Namespace: "prod",
+				Labels: map[string]string{
+					HelmManagedByLabel: HelmManagedByValue,
+					HelmInstanceLabel:  "app-y",
+					OptInLabel:         "false",
+				},
+			},
+		},
+	)
+
+	releases, _, conflicts, err := NewDiscovery(client, nil).DiscoverReleases(context.Background(), "prod")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if conflicts != 1 {
+		t.Errorf("expected 1 conflict for opt-in mismatch, got %d", conflicts)
+	}
+	if len(releases) != 0 {
+		t.Fatalf("expected unit app-y to be skipped due to conflict, got %d releases", len(releases))
 	}
 }
 

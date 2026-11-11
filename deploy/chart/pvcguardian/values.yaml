@@ -31,13 +31,13 @@ securityContext:
     drop:
       - ALL
 
-resources: {}
-  # limits:
-  #   cpu: 200m
-  #   memory: 256Mi
-  # requests:
-  #   cpu: 50m
-  #   memory: 64Mi
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 50m
+    memory: 64Mi
 
 nodeSelector: {}
 tolerations: []
@@ -54,6 +54,7 @@ config:
     namespace: velero
     storageLocation: ""
     defaultVolumesToFsBackup: true
+    snapshotVolumes: false
 
   schedules:
     timezone: UTC # Only UTC is supported; Velero cron expressions are UTC-based.
@@ -96,6 +97,32 @@ prometheusRule:
   namespace: "" # defaults to release namespace
   labels: {}
   annotations: {}
+
+networkPolicy:
+  enabled: true
+  # Ingress: if config.metrics.enabled is true, port 8080 is exposed by default.
+  # Otherwise, no ingress traffic is permitted.
+  ingress: []
+  # Egress: PVCGuardian only needs DNS resolution (CoreDNS / kube-system)
+  # and HTTPS access to the Kubernetes API server (ports 443 / 6443).
+  egress:
+    # Allow DNS resolution
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Allow Kubernetes API server access
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - port: 443
+          protocol: TCP
+        - port: 6443
+          protocol: TCP
 
 dashboard:
   enabled: true

@@ -39,7 +39,8 @@ discovery:
 velero:
   namespace: velero
   storageLocation: default           # Optional Velero BackupStorageLocation
-  defaultVolumesToFsBackup: true     # Use Kopia filesystem backup (portable across all StorageClasses)
+  defaultVolumesToFsBackup: true     # Use Kopia/Restic filesystem backup (requires Velero node-agent)
+  snapshotVolumes: false             # Use CSI volume snapshots (default: false)
 
 schedules:
   retention: 5d                      # Converted to Velero TTL (120h0m0s)
@@ -116,9 +117,10 @@ helm install pvcguardian deploy/chart/pvcguardian \
 | `pvcguardian_reconcile_duration_seconds` | Histogram | Latency histogram for reconciliation passes |
 | `pvcguardian_schedules_managed` | Gauge | Number of Velero Schedules currently maintained |
 | `pvcguardian_schedules_unmanaged` | Gauge | Velero Schedules in the Velero namespace not managed by PVCGuardian |
-| `pvcguardian_releases_skipped{reason="opt_out\|no_pvc"}` | Gauge | Backup units skipped during the last reconciliation cycle, by reason |
-| `pvcguardian_releases_skipped_total{reason="opt_out\|no_pvc"}` | Counter | Cumulative skip decisions, for rates and alerts |
+| `pvcguardian_releases_skipped{reason="opt_out\|no_pvc\|conflict"}` | Gauge | Backup units skipped during the last reconciliation cycle, by reason |
+| `pvcguardian_releases_skipped_total{reason="opt_out\|no_pvc\|conflict"}` | Counter | Cumulative skip decisions, for rates and alerts |
 | `pvcguardian_uncovered_pvcs` | Gauge | Count of PVCs in scanned namespaces not covered by any backup unit |
+| `pvcguardian_conflicting_units` | Gauge | Number of backup units skipped during the last reconciliation cycle due to conflicting configurations |
 
 ---
 

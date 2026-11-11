@@ -51,13 +51,14 @@ The following table lists the configurable parameters of the chart and their def
 | `podSecurityContext.runAsUser` | Non-root UID | `65532` |
 | `securityContext.readOnlyRootFilesystem` | Mount root filesystem read-only | `true` |
 | `securityContext.allowPrivilegeEscalation` | Prohibit privilege escalation | `false` |
-| `resources` | CPU/Memory resource requests and limits | `{}` |
+| `resources` | CPU/Memory resource requests and limits | `requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 200m, memory: 256Mi}` |
 | `config.discovery.requirePVC` | Only schedule releases having at least 1 PVC | `true` |
 | `config.discovery.defaultPreset` | Fallback schedule preset name | `evening` |
 | `config.discovery.excludeNamespaces` | Namespaces ignored by discovery scan | `["kube-system"]` |
 | `config.velero.namespace` | Namespace where Velero and its Schedules reside | `velero` |
 | `config.velero.storageLocation` | Velero BackupStorageLocation (empty = Velero default) | `""` |
 | `config.velero.defaultVolumesToFsBackup` | Use Kopia filesystem backup for all volumes | `true` |
+| `config.velero.snapshotVolumes` | Use CSI volume snapshots (can combine with fs backup) | `false` |
 | `config.schedules.timezone` | Reserved; windows are always evaluated in UTC | `UTC` |
 | `config.schedules.retention` | Backup retention duration (`5d`, `120h`, `30m`) | `5d` |
 | `config.schedules.windows.day.from` | Start of day window (HH:MM) | `10:00` |
@@ -78,6 +79,9 @@ The following table lists the configurable parameters of the chart and their def
 | `podMonitor.scrapeTimeout` | Scrape timeout | `10s` |
 | `prometheusRule.enabled` | Create Prometheus Operator alerting rules | `false` |
 | `prometheusRule.namespace` | PrometheusRule namespace (default: release namespace) | `""` |
+| `networkPolicy.enabled` | Create restrictive default NetworkPolicy | `true` |
+| `networkPolicy.ingress` | Ingress rules (empty = allow 8080 if metrics enabled) | `[]` |
+| `networkPolicy.egress` | Egress rules (DNS 53 and Kube API 443/6443) | `DNS + Kube API` |
 | `dashboard.enabled` | Deploy Grafana dashboard ConfigMap | `true` |
 | `dashboard.namespace` | Target namespace for the dashboard ConfigMap | `""` (release namespace) |
 | `dashboard.labels` | Labels for Grafana sidecar autodiscovery (`grafana_dashboard: "1"`) | `{ grafana_dashboard: "1" }` |

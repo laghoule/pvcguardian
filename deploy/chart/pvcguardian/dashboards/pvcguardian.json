@@ -177,6 +177,13 @@
               { "id": "displayName", "value": "No PVC (requirePVC)" },
               { "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } }
             ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "conflict" },
+            "properties": [
+              { "id": "displayName", "value": "Conflicting settings" },
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }
+            ]
           }
         ]
       },
@@ -376,6 +383,48 @@
         }
       ],
       "title": "Active Managed Schedules Trend",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 2,
+            "fillOpacity": 15
+          },
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 },
+              { "color": "red", "value": 3 }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 23 },
+      "id": 9,
+      "options": {
+        "legend": { "calcs": ["last", "max"], "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "single" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "editorMode": "code",
+          "expr": "pvcguardian_conflicting_units",
+          "legendFormat": "Conflicting Units",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Conflicting Units Trend",
       "type": "timeseries"
     }
   ],

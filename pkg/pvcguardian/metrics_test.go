@@ -20,7 +20,9 @@ func TestMetricsObserveAndServer(t *testing.T) {
 		SchedulesUnmanaged: 1,
 		SkippedOptOut:      1,
 		SkippedNoPVC:       2,
+		SkippedConflict:    1,
 		UncoveredPVCs:      3,
+		ConflictingUnits:   1,
 	}
 	m.ObserveCycle(150*time.Millisecond, res, nil)
 
@@ -80,6 +82,26 @@ func TestMetricsObserveAndServer(t *testing.T) {
 	if !containsString(bodyStr, `pvcguardian_releases_skipped_total{reason="no_pvc"} 2`) {
 		t.Errorf("expected pvcguardian_releases_skipped_total{reason=no_pvc} 2 in metrics output")
 	}
+	if !containsString(bodyStr, `pvcguardian_releases_skipped{reason="conflict"} 1`) {
+		t.Errorf("expected pvcguardian_releases_skipped{reason=conflict} 1 in metrics output")
+	}
+	if !containsString(bodyStr, `pvcguardian_releases_skipped_total{reason="conflict"} 1`) {
+		t.Errorf("expected pvcguardian_releases_skipped_total{reason=conflict} 1 in metrics output")
+	}
+	if !containsString(bodyStr, "pvcguardian_conflicting_units 1") {
+		t.Errorf("expected pvcguardian_conflicting_units 1 in metrics output")
+	}
+
+	// Test healthChecker reporting unhealthy
+	m.SetHealthChecker(func() bool { return false })
+	unhealthyResp, err := http.Get("http://" + addr + "/healthz")
+	if err != nil {
+		t.Fatalf("healthz request failed: %v", err)
+	}
+	if unhealthyResp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("expected 503 for unhealthy healthz, got %d", unhealthyResp.StatusCode)
+	}
+	_ = unhealthyResp.Body.Close()
 }
 
 func containsString(s, substr string) bool {

@@ -98,6 +98,17 @@ func TestCalculateCronWithinWindow(t *testing.T) {
 	if cronCustom != "15 3 * * 1" || slotCustom != "custom" {
 		t.Errorf("unexpected custom cron result: %s, %s", cronCustom, slotCustom)
 	}
+
+	// Test midnight crossing window (23:00 to 02:00)
+	cfg.Schedules.Windows["overnight"] = config.TimeWindow{From: "23:00", To: "02:00"}
+	cronNight, slotNight, err := builder.CalculateCron("prod", "service", "overnight")
+	if err != nil {
+		t.Fatalf("unexpected error for overnight window: %v", err)
+	}
+	nightHour := int(slotNight[0]-'0')*10 + int(slotNight[1]-'0')
+	if !(nightHour >= 23 || nightHour < 2) {
+		t.Errorf("expected hour in [23, 24) or [0, 2), got %d (slot: %s, cron: %s)", nightHour, slotNight, cronNight)
+	}
 }
 
 func TestBuildSchedule(t *testing.T) {
@@ -161,6 +172,17 @@ func TestBuildSchedule(t *testing.T) {
 	}
 	if *sch.Spec.Template.SnapshotVolumes != false {
 		t.Errorf("expected SnapshotVolumes to be false")
+	}
+
+	// Test with SnapshotVolumes enabled
+	cfg.Velero.SnapshotVolumes = true
+	builderWithSnapshots := NewScheduleBuilder(&cfg)
+	schSnap, err := builderWithSnapshots.BuildSchedule(rel)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if *schSnap.Spec.Template.SnapshotVolumes != true {
+		t.Errorf("expected SnapshotVolumes to be true when configured")
 	}
 	if sch.Spec.Template.StorageLocation != "minio" {
 		t.Errorf("expected storage location minio, got %s", sch.Spec.Template.StorageLocation)

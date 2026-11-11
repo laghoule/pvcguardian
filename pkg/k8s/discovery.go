@@ -42,6 +42,14 @@ type DiscoveredRelease struct {
 	OptIn           bool              // true if explicitly opted in via label="true"
 	AnnotatedPreset string            // preset specified in pvcguardian.io/preset annotation
 	Selector        map[string]string // matchLabels from pvcguardian.io/selector, nil for Helm-derived units
+	Conflict        bool              // true if unit had conflicting selectors, presets, or opt-in/opt-out
+}
+
+// DiscoveryReport contains discovered releases, uncovered PVCs, and count of conflicting units.
+type DiscoveryReport struct {
+	Releases         []DiscoveredRelease
+	UncoveredPVCs    []string
+	ConflictingUnits int
 }
 
 // Discovery holds context and clients needed to scan workloads and PVCs.
@@ -84,11 +92,15 @@ func (d *Discovery) ListScannableNamespaces(ctx context.Context, excluded []stri
 }
 
 // DiscoverReleases scans workloads in a namespace and associates their PVCs.
-func (d *Discovery) DiscoverReleases(ctx context.Context, namespace string) ([]DiscoveredRelease, []string, error) {
+// It returns discovered releases, uncovered PVC names, and the count of units skipped due to conflicts.
+func (d *Discovery) DiscoverReleases(ctx context.Context, namespace string) ([]DiscoveredRelease, []string, int, error) {
 	type releaseMeta struct {
 		chart            string
-		optIn            bool
+		optInSet         bool
+		optInVal         bool
+		optInConflict    bool
 		preset           string
+		presetConflict   bool
 		claims           map[string]struct{}
 		prefixes         []string
 		selector         map[string]string
@@ -156,8 +168,11 @@ func (d *Discovery) DiscoverReleases(ctx context.Context, namespace string) ([]D
 					"existing", rm.selectorRaw,
 					"conflicting", rawSelector)
 			}
-			// Declaring a selector is an explicit opt-in.
-			rm.optIn = true
+			// Declaring a selector implies opt-in unless explicitly opted out.
+			if !rm.optInSet {
+				rm.optInSet = true
+				rm.optInVal = true
+			}
 		}
 
 		if meta.UID != "" {
@@ -169,14 +184,36 @@ func (d *Discovery) DiscoverReleases(ctx context.Context, namespace string) ([]D
 		}
 
 		if val, ok := meta.Labels[OptInLabel]; ok {
-			if strings.EqualFold(strings.TrimSpace(val), "true") {
-				rm.optIn = true
+			trimmed := strings.ToLower(strings.TrimSpace(val))
+			workloadOptIn := (trimmed == "true")
+			if !rm.optInSet {
+				rm.optInSet = true
+				rm.optInVal = workloadOptIn
+			} else if rm.optInVal != workloadOptIn {
+				rm.optInConflict = true
+				d.logger.Warn("Conflicting opt-in settings for the same backup unit",
+					"namespace", namespace,
+					"unit", instance,
+					"existing", rm.optInVal,
+					"conflicting", workloadOptIn)
 			}
 		}
 
-		if meta.Annotations != nil && rm.preset == "" {
+		if meta.Annotations != nil {
 			if p, ok := meta.Annotations[PresetAnnotation]; ok {
-				rm.preset = strings.TrimSpace(p)
+				trimmedPreset := strings.TrimSpace(p)
+				if trimmedPreset != "" {
+					if rm.preset == "" {
+						rm.preset = trimmedPreset
+					} else if rm.preset != trimmedPreset {
+						rm.presetConflict = true
+						d.logger.Warn("Conflicting presets for the same backup unit",
+							"namespace", namespace,
+							"unit", instance,
+							"existing", rm.preset,
+							"conflicting", trimmedPreset)
+					}
+				}
 			}
 		}
 
@@ -188,7 +225,7 @@ func (d *Discovery) DiscoverReleases(ctx context.Context, namespace string) ([]D
 
 	deps, err := d.kubeClient.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return nil, nil, fmt.Errorf("listing deployments in %s: %w", namespace, err)
+		return nil, nil, 0, fmt.Errorf("listing deployments in %s: %w", namespace, err)
 	}
 	for _, item := range deps.Items {
 		recordWorkload("Deployment", item.Name, item.ObjectMeta, claimNamesFromVolumes(item.Spec.Template.Spec.Volumes), nil)
@@ -196,7 +233,7 @@ func (d *Discovery) DiscoverReleases(ctx context.Context, namespace string) ([]D
 
 	sts, err := d.kubeClient.AppsV1().StatefulSets(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return nil, nil, fmt.Errorf("listing statefulsets in %s: %w", namespace, err)
+		return nil, nil, 0, fmt.Errorf("listing statefulsets in %s: %w", namespace, err)
 	}
 	for _, item := range sts.Items {
 		var prefixes []string
@@ -210,7 +247,7 @@ func (d *Discovery) DiscoverReleases(ctx context.Context, namespace string) ([]D
 
 	ds, err := d.kubeClient.AppsV1().DaemonSets(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return nil, nil, fmt.Errorf("listing daemonsets in %s: %w", namespace, err)
+		return nil, nil, 0, fmt.Errorf("listing daemonsets in %s: %w", namespace, err)
 	}
 	for _, item := range ds.Items {
 		recordWorkload("DaemonSet", item.Name, item.ObjectMeta, claimNamesFromVolumes(item.Spec.Template.Spec.Volumes), nil)
@@ -218,7 +255,7 @@ func (d *Discovery) DiscoverReleases(ctx context.Context, namespace string) ([]D
 
 	cjs, err := d.kubeClient.BatchV1().CronJobs(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return nil, nil, fmt.Errorf("listing cronjobs in %s: %w", namespace, err)
+		return nil, nil, 0, fmt.Errorf("listing cronjobs in %s: %w", namespace, err)
 	}
 	for _, item := range cjs.Items {
 		recordWorkload("CronJob", item.Name, item.ObjectMeta, claimNamesFromVolumes(item.Spec.JobTemplate.Spec.Template.Spec.Volumes), nil)
@@ -226,27 +263,35 @@ func (d *Discovery) DiscoverReleases(ctx context.Context, namespace string) ([]D
 
 	jobs, err := d.kubeClient.BatchV1().Jobs(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return nil, nil, fmt.Errorf("listing jobs in %s: %w", namespace, err)
+		return nil, nil, 0, fmt.Errorf("listing jobs in %s: %w", namespace, err)
 	}
 	for _, item := range jobs.Items {
 		recordWorkload("Job", item.Name, item.ObjectMeta, claimNamesFromVolumes(item.Spec.Template.Spec.Volumes), nil)
 	}
 
-	// Drop units whose workloads declared incompatible selectors. Their PVCs
-	// will fall through to the uncovered list instead of silently belonging to
-	// no unit.
+	// Drop units whose workloads declared incompatible selectors, presets or opt-in.
+	// Their PVCs will fall through to the uncovered list instead of silently belonging to no unit.
+	conflictingUnits := 0
 	for name, rm := range releases {
-		if rm.selectorConflict {
-			d.logger.Warn("Skipping backup unit with conflicting selectors",
+		if rm.selectorConflict || rm.presetConflict || rm.optInConflict {
+			conflictingUnits++
+			reason := "conflicting selectors"
+			if rm.presetConflict {
+				reason = "conflicting presets"
+			} else if rm.optInConflict {
+				reason = "conflicting opt-in settings"
+			}
+			d.logger.Warn("Skipping backup unit due to conflict",
 				"namespace", namespace,
-				"unit", name)
+				"unit", name,
+				"reason", reason)
 			delete(releases, name)
 		}
 	}
 
 	pvcList, err := d.kubeClient.CoreV1().PersistentVolumeClaims(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return nil, nil, fmt.Errorf("listing PVCs in %s: %w", namespace, err)
+		return nil, nil, 0, fmt.Errorf("listing PVCs in %s: %w", namespace, err)
 	}
 
 	pvcByRelease := make(map[string][]string)
@@ -356,7 +401,7 @@ func (d *Discovery) DiscoverReleases(ctx context.Context, namespace string) ([]D
 			Name:            name,
 			Chart:           meta.chart,
 			PVCs:            pvcs,
-			OptIn:           meta.optIn,
+			OptIn:           meta.optInVal,
 			AnnotatedPreset: meta.preset,
 			Selector:        maps.Clone(meta.selector),
 		})
@@ -367,7 +412,7 @@ func (d *Discovery) DiscoverReleases(ctx context.Context, namespace string) ([]D
 	})
 	sort.Strings(uncoveredPVCs)
 
-	return result, uncoveredPVCs, nil
+	return result, uncoveredPVCs, conflictingUnits, nil
 }
 
 // claimNamesFromVolumes extracts PVC claim names referenced by pod volumes.

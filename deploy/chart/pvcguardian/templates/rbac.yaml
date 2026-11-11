@@ -5,30 +5,25 @@ metadata:
   labels:
     {{- include "pvcguardian.labels" . | nindent 4 }}
 rules:
-  # Opt-in namespace discovery
+  # Scannable namespace discovery
   - apiGroups: [""]
     resources: ["namespaces"]
     verbs: ["get", "list"]
 
-  # Workload discovery for Helm releases (Deployment, StatefulSet, DaemonSet)
+  # Workload discovery for backup units (Deployment, StatefulSet, DaemonSet)
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets", "daemonsets"]
-    verbs: ["list"]
+    verbs: ["get", "list"]
 
   # Workload discovery for Batch workloads (CronJobs, Jobs)
   - apiGroups: ["batch"]
     resources: ["cronjobs", "jobs"]
-    verbs: ["list"]
+    verbs: ["get", "list"]
 
   # PVC association & coverage checks
   - apiGroups: [""]
     resources: ["persistentvolumeclaims"]
-    verbs: ["list"]
-
-  # Velero Schedules lifecycle management
-  - apiGroups: ["velero.io"]
-    resources: ["schedules"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+    verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -40,6 +35,35 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: {{ include "pvcguardian.fullname" . }}
+  subjects:
+  - kind: ServiceAccount
+    name: {{ include "pvcguardian.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+---
+# Velero Schedules lifecycle management restricted to the configured Velero namespace
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "pvcguardian.fullname" . }}-velero
+  namespace: {{ .Values.config.velero.namespace }}
+  labels:
+    {{- include "pvcguardian.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["velero.io"]
+    resources: ["schedules"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "pvcguardian.fullname" . }}-velero
+  namespace: {{ .Values.config.velero.namespace }}
+  labels:
+    {{- include "pvcguardian.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "pvcguardian.fullname" . }}-velero
 subjects:
   - kind: ServiceAccount
     name: {{ include "pvcguardian.serviceAccountName" . }}

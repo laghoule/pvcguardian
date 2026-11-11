@@ -72,8 +72,11 @@ func main() {
 
 	discovery := k8s.NewDiscovery(kubeClient, logger)
 	veleroClient := k8s.NewDynamicVeleroClient(dynClient)
-
 	metrics := pvcguardian.NewMetrics()
+	reconciler := pvcguardian.NewReconciler(cfg, *configPath, discovery, veleroClient, nil, metrics, logger)
+
+	metrics.SetHealthChecker(reconciler.IsHealthy)
+
 	if cfg.Metrics.Enabled {
 		logger.Info("Starting Prometheus metrics server", "addr", cfg.Metrics.Addr)
 		if err := metrics.StartServer(cfg.Metrics.Addr); err != nil {
@@ -83,8 +86,6 @@ func main() {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-
-	reconciler := pvcguardian.NewReconciler(cfg, *configPath, discovery, veleroClient, nil, metrics, logger)
 
 	if err := reconciler.RunLoop(ctx); err != nil && err != context.Canceled {
 		logger.Error("Reconciler exited with error", "error", err)

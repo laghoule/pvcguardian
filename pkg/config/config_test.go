@@ -130,9 +130,9 @@ func TestInvalidConfigFailsValidation(t *testing.T) {
 			},
 		},
 		{
-			name: "invalid window from >= to",
+			name: "invalid window from == to",
 			mutator: func(c *Config) {
-				c.Schedules.Windows["bad"] = TimeWindow{From: "20:00", To: "19:00"}
+				c.Schedules.Windows["bad"] = TimeWindow{From: "20:00", To: "20:00"}
 			},
 		},
 		{

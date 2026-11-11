@@ -32,6 +32,15 @@ spec:
           labels:
             severity: info
           annotations:
-            summary: "PVCs not covered by any Helm release"
-            description: "There are {{ `{{ $value }}` }} PersistentVolumeClaims in opted-in namespaces that are not covered by any Velero schedule."
+            summary: "PVCs not covered by any backup unit"
+            description: "There are {{ `{{ $value }}` }} PersistentVolumeClaims in scanned namespaces that are not covered by any Velero schedule."
+
+        - alert: PVCGuardianConflictingUnits
+          expr: pvcguardian_conflicting_units > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Conflicting backup unit configurations detected"
+            description: "There are {{ `{{ $value }}` }} backup units skipped due to conflicting selectors, presets, or opt-in settings."
 {{- end }}

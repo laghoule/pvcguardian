@@ -3,13 +3,16 @@ package pvcguardian
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	clienttesting "k8s.io/client-go/testing"
 
 	velerov1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 
@@ -502,4 +505,89 @@ func gaugeVecValue(t *testing.T, gv *prometheus.GaugeVec, reason string) float64
 	}
 	t.Fatalf("series with reason=%q not found", reason)
 	return 0
+}
+
+func TestReconcilePreservesSchedulesOnDiscoveryFailure(t *testing.T) {
+	ctx := context.Background()
+
+	kubeClient := fake.NewSimpleClientset(
+		&corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: "prod"},
+		},
+		&appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "web",
+				Namespace: "prod",
+				Labels: map[string]string{
+					k8s.HelmManagedByLabel: k8s.HelmManagedByValue,
+					k8s.HelmInstanceLabel:  "web-release",
+					k8s.OptInLabel:         "true",
+				},
+			},
+			Spec: appsv1.DeploymentSpec{
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Volumes: []corev1.Volume{
+							{
+								Name: "data",
+								VolumeSource: corev1.VolumeSource{
+									PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+										ClaimName: "web-data",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		&corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "web-data",
+				Namespace: "prod",
+				Labels: map[string]string{
+					k8s.HelmInstanceLabel: "web-release",
+				},
+			},
+		},
+	)
+
+	cfg := config.DefaultConfig()
+	cfg.Velero.Namespace = "velero"
+
+	discovery := k8s.NewDiscovery(kubeClient, nil)
+	veleroClient := k8s.NewFakeVeleroClient()
+	reconciler := NewReconciler(&cfg, "", discovery, veleroClient, nil, nil, nil)
+
+	// First pass: schedule created
+	res, err := reconciler.ReconcileOnce(ctx)
+	if err != nil {
+		t.Fatalf("initial reconcile failed: %v", err)
+	}
+	if res.CreatedSchedules != 1 {
+		t.Fatalf("expected 1 created schedule, got %d", res.CreatedSchedules)
+	}
+	const scheduleKey = "velero/pvcguardian-prod-web-release"
+	if veleroClient.Schedules[scheduleKey] == nil {
+		t.Fatalf("expected schedule %s to exist", scheduleKey)
+	}
+
+	// Now simulate API failure on listing deployments by deleting namespace or prepending reactor
+	// If deployment listing fails in prod namespace, DiscoverReleases will fail.
+	kubeClient.PrependReactor("list", "deployments", func(action clienttesting.Action) (handled bool, ret runtime.Object, err error) {
+		return true, nil, fmt.Errorf("simulated API server timeout")
+	})
+
+	res, err = reconciler.ReconcileOnce(ctx)
+	if err == nil {
+		t.Fatalf("expected error from ReconcileOnce on discovery failure, got nil")
+	}
+
+	// Crucial check: schedule MUST NOT be deleted
+	if veleroClient.Schedules[scheduleKey] == nil {
+		t.Fatalf("schedule %s was deleted despite discovery failure in its namespace!", scheduleKey)
+	}
+	if res.DeletedSchedules != 0 {
+		t.Errorf("expected 0 deleted schedules, got %d", res.DeletedSchedules)
+	}
 }

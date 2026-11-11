@@ -106,7 +106,7 @@ func (b *ScheduleBuilder) CalculateCron(namespace, release, preset string) (cron
 
 	windowDuration := mTo - mFrom
 	if windowDuration <= 0 {
-		return "", "", fmt.Errorf("window %q has non-positive duration", preset)
+		windowDuration += 1440
 	}
 
 	hash := DeterministicHash(namespace, release)
@@ -118,7 +118,7 @@ func (b *ScheduleBuilder) CalculateCron(namespace, release, preset string) (cron
 	// windowDuration is validated by TimeWindow.WindowMinutes to be in
 	// (0, 1440], so the uint32 conversion cannot overflow.
 	offset := int(hashNum % uint32(windowDuration)) // #nosec G115 -- bounded window duration (<= 1440 minutes).
-	targetMinuteOfDay := mFrom + offset
+	targetMinuteOfDay := (mFrom + offset) % 1440
 
 	hour := targetMinuteOfDay / 60
 	minute := targetMinuteOfDay % 60
@@ -155,7 +155,7 @@ func (b *ScheduleBuilder) BuildSchedule(rel k8s.DiscoveredRelease) (*velerov1.Sc
 	fullName := fmt.Sprintf("%s%s-%s", SchedulePrefix, rel.Namespace, rel.Name)
 	hash8 := DeterministicHash(rel.Namespace, rel.Name)[:HashSuffixLen]
 
-	snapshotVolumes := false
+	snapshotVolumes := b.cfg.Velero.SnapshotVolumes
 	defaultFsBackup := b.cfg.Velero.DefaultVolumesToFsBackup
 
 	// Selector-based units declare their own scope. The explicit PVC label is

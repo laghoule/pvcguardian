@@ -23,8 +23,10 @@ type Metrics struct {
 	ReleasesSkipped          *prometheus.GaugeVec
 	ReleasesSkippedTotal     *prometheus.CounterVec
 	UncoveredPVCs            prometheus.Gauge
+	ConflictingUnits         prometheus.Gauge
 	registry                 *prometheus.Registry
 	server                   *http.Server
+	healthChecker            func() bool
 }
 
 // NewMetrics initializes and registers all Prometheus collectors.
@@ -64,19 +66,25 @@ func NewMetrics() *Metrics {
 				Name: "pvcguardian_releases_skipped",
 				Help: "Number of backup units (Helm releases or selector units) skipped during the last reconciliation cycle, partitioned by reason.",
 			},
-			[]string{"reason"}, // "opt_out" | "no_pvc"
+			[]string{"reason"}, // "opt_out" | "no_pvc" | "conflict"
 		),
 		ReleasesSkippedTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "pvcguardian_releases_skipped_total",
 				Help: "Total number of skip decisions for backup units, partitioned by reason.",
 			},
-			[]string{"reason"}, // "opt_out" | "no_pvc"
+			[]string{"reason"}, // "opt_out" | "no_pvc" | "conflict"
 		),
 		UncoveredPVCs: prometheus.NewGauge(
 			prometheus.GaugeOpts{
 				Name: "pvcguardian_uncovered_pvcs",
 				Help: "Number of PVCs in scanned namespaces that are not covered by any backup unit.",
+			},
+		),
+		ConflictingUnits: prometheus.NewGauge(
+			prometheus.GaugeOpts{
+				Name: "pvcguardian_conflicting_units",
+				Help: "Number of backup units skipped during the last reconciliation cycle due to conflicting configurations (selectors, presets, or opt-in settings).",
 			},
 		),
 	}
@@ -89,9 +97,15 @@ func NewMetrics() *Metrics {
 		m.ReleasesSkipped,
 		m.ReleasesSkippedTotal,
 		m.UncoveredPVCs,
+		m.ConflictingUnits,
 	)
 
 	return m
+}
+
+// SetHealthChecker registers a callback to report daemon health for /healthz.
+func (m *Metrics) SetHealthChecker(checker func() bool) {
+	m.healthChecker = checker
 }
 
 // StartServer starts the HTTP server exposing Prometheus metrics on /metrics.
@@ -99,6 +113,11 @@ func (m *Metrics) StartServer(addr string) error {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{}))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		if m.healthChecker != nil && !m.healthChecker() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = io.WriteString(w, "unhealthy\n")
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = io.WriteString(w, "ok\n")
 	})
@@ -139,18 +158,23 @@ func (m *Metrics) ObserveCycle(duration time.Duration, res *ReconcileResult, err
 		m.SchedulesManaged.Set(float64(res.SchedulesManaged))
 		m.SchedulesUnmanaged.Set(float64(res.SchedulesUnmanaged))
 		m.UncoveredPVCs.Set(float64(res.UncoveredPVCs))
+		m.ConflictingUnits.Set(float64(res.ConflictingUnits))
 
 		// Gauges are set (not accumulated) so they reflect the last cycle and
-		// do not depend on the reconcile interval. Both reasons are always
+		// do not depend on the reconcile interval. All reasons are always
 		// written to avoid stale values.
 		m.ReleasesSkipped.WithLabelValues("opt_out").Set(float64(res.SkippedOptOut))
 		m.ReleasesSkipped.WithLabelValues("no_pvc").Set(float64(res.SkippedNoPVC))
+		m.ReleasesSkipped.WithLabelValues("conflict").Set(float64(res.SkippedConflict))
 
 		if res.SkippedOptOut > 0 {
 			m.ReleasesSkippedTotal.WithLabelValues("opt_out").Add(float64(res.SkippedOptOut))
 		}
 		if res.SkippedNoPVC > 0 {
 			m.ReleasesSkippedTotal.WithLabelValues("no_pvc").Add(float64(res.SkippedNoPVC))
+		}
+		if res.SkippedConflict > 0 {
+			m.ReleasesSkippedTotal.WithLabelValues("conflict").Add(float64(res.SkippedConflict))
 		}
 	}
 }

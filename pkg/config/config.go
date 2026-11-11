@@ -26,6 +26,8 @@ type TimeWindow struct {
 }
 
 // WindowMinutes returns From and To parsed as minutes from midnight.
+// If From and To are identical, an error is returned. If From > To, the
+// window crosses midnight (e.g. 23:00 to 03:00).
 func (w TimeWindow) WindowMinutes() (int, int, error) {
 	mFrom, err := parseHHMM(w.From)
 	if err != nil {
@@ -35,8 +37,8 @@ func (w TimeWindow) WindowMinutes() (int, int, error) {
 	if err != nil {
 		return 0, 0, fmt.Errorf("invalid 'to' time %q: %w", w.To, err)
 	}
-	if mFrom >= mTo {
-		return 0, 0, fmt.Errorf("'from' (%s) must be strictly before 'to' (%s)", w.From, w.To)
+	if mFrom == mTo {
+		return 0, 0, fmt.Errorf("'from' (%s) and 'to' (%s) must not be equal", w.From, w.To)
 	}
 	return mFrom, mTo, nil
 }
@@ -63,6 +65,7 @@ type VeleroConfig struct {
 	Namespace                string `yaml:"namespace"`       // default "velero"
 	StorageLocation          string `yaml:"storageLocation"` // optional
 	DefaultVolumesToFsBackup bool   `yaml:"defaultVolumesToFsBackup"`
+	SnapshotVolumes          bool   `yaml:"snapshotVolumes"` // default false
 }
 
 // SchedulesConfig holds presets windows, custom crons, timezone and retention.
@@ -114,6 +117,7 @@ func DefaultConfig() Config {
 			Namespace:                "velero",
 			StorageLocation:          "",
 			DefaultVolumesToFsBackup: true,
+			SnapshotVolumes:          false,
 		},
 		Schedules: SchedulesConfig{
 			Timezone:  "UTC",

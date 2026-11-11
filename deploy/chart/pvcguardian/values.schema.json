@@ -140,6 +140,9 @@
             },
             "defaultVolumesToFsBackup": {
               "type": "boolean"
+            },
+            "snapshotVolumes": {
+              "type": "boolean"
             }
           }
         },

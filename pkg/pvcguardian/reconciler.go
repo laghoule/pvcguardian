@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	velerov1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
@@ -26,25 +27,31 @@ type Reconciler struct {
 	metrics      *Metrics
 	logger       *slog.Logger
 	builder      *ScheduleBuilder
+
+	mu              sync.RWMutex
+	lastSuccessTime time.Time
 }
 
 // ReconcileResult summarizes the outcome of one reconciliation cycle.
 type ReconcileResult struct {
-	OptInNamespaces    int
-	DiscoveredReleases int
-	CreatedSchedules   int
-	UpdatedSchedules   int
-	DeletedSchedules   int
-	SchedulesManaged   int
-	SchedulesUnmanaged int
-	SkippedOptOut      int
-	SkippedNoPVC       int
-	UncoveredPVCs      int
+	OptInNamespaces     int
+	DiscoveredReleases  int
+	CreatedSchedules    int
+	UpdatedSchedules    int
+	DeletedSchedules    int
+	SchedulesManaged    int
+	SchedulesUnmanaged  int
+	SkippedOptOut       int
+	SkippedNoPVC        int
+	SkippedConflict     int
+	UncoveredPVCs       int
+	ConflictingUnits    int
+	DiscoveryErrors     int
 }
 
 // SkippedTotal returns the total number of releases skipped in the cycle.
 func (r *ReconcileResult) SkippedTotal() int {
-	return r.SkippedOptOut + r.SkippedNoPVC
+	return r.SkippedOptOut + r.SkippedNoPVC + r.SkippedConflict
 }
 
 // NewReconciler creates a Reconciler.
@@ -109,20 +116,27 @@ func (r *Reconciler) ReconcileOnce(ctx context.Context) (result *ReconcileResult
 	r.logger.Info("Scannable namespaces identified", "count", len(namespaces), "namespaces", namespaces)
 
 	desiredSchedules := make(map[string]*velerov1.Schedule)
+	scannedNamespaces := make(map[string]bool)
+	var discoveryErrCount int
 	totalUncovered := 0
+	totalConflicts := 0
 
 	for _, ns := range namespaces {
-		releases, uncovered, err := r.discovery.DiscoverReleases(ctx, ns)
+		releases, uncovered, conflicts, err := r.discovery.DiscoverReleases(ctx, ns)
 		if err != nil {
-			r.logger.Error("Failed to discover releases in namespace", "namespace", ns, "error", err)
+			discoveryErrCount++
+			r.logger.Error("Failed to discover releases in namespace; skipping schedule cleanup for this namespace", "namespace", ns, "error", err)
 			continue
 		}
+		scannedNamespaces[ns] = true
+		totalConflicts += conflicts
+		result.SkippedConflict += conflicts
 
 		result.DiscoveredReleases += len(releases)
 
 		if len(uncovered) > 0 {
 			totalUncovered += len(uncovered)
-			r.logger.Warn("Discovered PVCs not matched to any Helm release in namespace",
+			r.logger.Warn("Discovered PVCs not matched to any backup unit in namespace",
 				"namespace", ns,
 				"uncovered_count", len(uncovered),
 				"pvcs", uncovered)
@@ -156,6 +170,8 @@ func (r *Reconciler) ReconcileOnce(ctx context.Context) (result *ReconcileResult
 		}
 	}
 	result.UncoveredPVCs = totalUncovered
+	result.ConflictingUnits = totalConflicts
+	result.DiscoveryErrors = discoveryErrCount
 
 	// List every schedule in the Velero namespace so unmanaged ones (created
 	// manually or by other tooling) can be reported, then keep only the
@@ -239,8 +255,19 @@ func (r *Reconciler) ReconcileOnce(ctx context.Context) (result *ReconcileResult
 		}
 	}
 
-	// 5. Delete orphaned schedules (existing in PVCGuardian management, but no longer desired)
+	// 5. Delete orphaned schedules (existing in PVCGuardian management, but no longer desired).
+	// Only delete schedules for namespaces that were successfully scanned to avoid
+	// pruning schedules due to transient discovery errors.
 	for key, existing := range existingBySource {
+		srcNs := existing.Annotations[SourceNamespaceAnno]
+		if !scannedNamespaces[srcNs] {
+			r.logger.Warn("Preserving schedule for unscanned namespace due to discovery failure",
+				"schedule", existing.Name,
+				"namespace", srcNs,
+				"source", key)
+			continue
+		}
+
 		if _, desired := desiredSchedules[key]; !desired {
 			r.logger.Warn("Deleting orphaned schedule (release removed or opt-out applied). Existing Backups are preserved.",
 				"schedule", existing.Name,
@@ -270,6 +297,14 @@ func (r *Reconciler) ReconcileOnce(ctx context.Context) (result *ReconcileResult
 		"unmanagedSchedules", result.SchedulesUnmanaged,
 		"skipped", result.SkippedTotal(),
 		"uncoveredPVCs", result.UncoveredPVCs)
+
+	if discoveryErrCount > 0 {
+		return result, fmt.Errorf("discovery failed in %d namespace(s)", discoveryErrCount)
+	}
+
+	r.mu.Lock()
+	r.lastSuccessTime = time.Now()
+	r.mu.Unlock()
 
 	return result, nil
 }
@@ -316,6 +351,25 @@ func (r *Reconciler) needsUpdate(existing, desired *velerov1.Schedule) bool {
 	}
 
 	return false
+}
+
+// IsHealthy reports whether the reconciler has executed at least one successful reconciliation
+// cycle within a reasonable window (e.g. 3x reconcile interval, min 5 minutes).
+func (r *Reconciler) IsHealthy() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if r.lastSuccessTime.IsZero() {
+		// Before first successful cycle, consider healthy during startup period.
+		return true
+	}
+
+	maxDelay := 3 * r.cfg.Reconcile.Interval
+	if maxDelay < 5*time.Minute {
+		maxDelay = 5 * time.Minute
+	}
+
+	return time.Since(r.lastSuccessTime) <= maxDelay
 }
 
 // recordEvent publishes an event if a recorder is configured.
