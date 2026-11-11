@@ -9,7 +9,10 @@ DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 LDFLAGS = -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
 
-.PHONY: all build test lint image clean
+GOSEC ?= gosec
+GOSEC_VERSION ?= v2.30.0
+
+.PHONY: all build test lint gosec image clean
 
 all: test build
 
@@ -22,6 +25,14 @@ test:
 
 lint:
 	go vet ./cmd/... ./pkg/...
+
+gosec:
+	@command -v $(GOSEC) >/dev/null 2>&1 || { \
+		echo "$(GOSEC) not found. Install it with:"; \
+		echo "  go install github.com/securego/gosec/v2/cmd/gosec@$(GOSEC_VERSION)"; \
+		exit 1; \
+	}
+	$(GOSEC) -fmt=text ./...
 
 image:
 	docker build \

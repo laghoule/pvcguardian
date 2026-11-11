@@ -1,0 +1,46 @@
+name: Security Scan
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+# Least privilege at top-level
+permissions: {}
+
+concurrency:
+  group: gosec-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Keep in sync with GOSEC_VERSION in the Makefile.
+  GOSEC_VERSION: v2.30.0
+
+jobs:
+  gosec:
+    name: Run gosec
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install gosec
+        run: |
+          set -euo pipefail
+          go install "github.com/securego/gosec/v2/cmd/gosec@${GOSEC_VERSION}"
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Run gosec
+        run: make gosec
