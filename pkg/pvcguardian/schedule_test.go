@@ -166,3 +166,34 @@ func TestBuildSchedule(t *testing.T) {
 		t.Errorf("expected storage location minio, got %s", sch.Spec.Template.StorageLocation)
 	}
 }
+
+func TestBuildScheduleWithSelector(t *testing.T) {
+	cfg := config.DefaultConfig()
+	builder := NewScheduleBuilder(&cfg)
+
+	rel := k8s.DiscoveredRelease{
+		Namespace: "prod",
+		Name:      "coroot-operator",
+		Selector:  map[string]string{"app.kubernetes.io/part-of": "coroot"},
+	}
+
+	sch, err := builder.BuildSchedule(rel)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(sch.Spec.Template.OrLabelSelectors) != 2 {
+		t.Fatalf("expected 2 orLabelSelectors, got %d", len(sch.Spec.Template.OrLabelSelectors))
+	}
+	if got := sch.Spec.Template.OrLabelSelectors[0].MatchLabels["app.kubernetes.io/part-of"]; got != "coroot" {
+		t.Errorf("expected selector part-of=coroot, got %q", got)
+	}
+	if got := sch.Spec.Template.OrLabelSelectors[1].MatchLabels[k8s.ReleaseLabel]; got != "coroot-operator" {
+		t.Errorf("expected release label selector coroot-operator, got %q", got)
+	}
+	for _, sel := range sch.Spec.Template.OrLabelSelectors {
+		if _, ok := sel.MatchLabels[k8s.HelmInstanceLabel]; ok {
+			t.Errorf("did not expect an instance selector for a selector-based unit")
+		}
+	}
+}

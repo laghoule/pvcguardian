@@ -23,6 +23,7 @@ type Reconciler struct {
 	discovery    *k8s.Discovery
 	veleroClient k8s.VeleroClient
 	recorder     record.EventRecorder
+	metrics      *Metrics
 	logger       *slog.Logger
 	builder      *ScheduleBuilder
 }
@@ -34,13 +35,14 @@ type ReconcileResult struct {
 	CreatedSchedules   int
 	UpdatedSchedules   int
 	DeletedSchedules   int
+	SchedulesManaged   int
 	SkippedReleases    int
 	UncoveredPVCs      int
 }
 
 // NewReconciler creates a Reconciler.
 func NewReconciler(cfg *config.Config, configPath string, discovery *k8s.Discovery,
-	veleroClient k8s.VeleroClient, recorder record.EventRecorder, logger *slog.Logger) *Reconciler {
+	veleroClient k8s.VeleroClient, recorder record.EventRecorder, metrics *Metrics, logger *slog.Logger) *Reconciler {
 
 	if logger == nil {
 		logger = slog.Default()
@@ -52,6 +54,7 @@ func NewReconciler(cfg *config.Config, configPath string, discovery *k8s.Discove
 		discovery:    discovery,
 		veleroClient: veleroClient,
 		recorder:     recorder,
+		metrics:      metrics,
 		logger:       logger,
 		builder:      NewScheduleBuilder(cfg),
 	}
@@ -78,11 +81,16 @@ func (r *Reconciler) reloadConfig() {
 
 // ReconcileOnce performs a single pass over opt-in namespaces, discovers releases,
 // creates/updates desired schedules, and deletes orphaned ones.
-func (r *Reconciler) ReconcileOnce(ctx context.Context) (*ReconcileResult, error) {
+func (r *Reconciler) ReconcileOnce(ctx context.Context) (result *ReconcileResult, err error) {
 	r.reloadConfig()
 
-	result := &ReconcileResult{}
 	start := time.Now()
+	result = &ReconcileResult{}
+	defer func() {
+		if r.metrics != nil {
+			r.metrics.ObserveCycle(time.Since(start), result, err)
+		}
+	}()
 
 	r.logger.Info("Starting reconciliation cycle", "optInLabel", k8s.OptInLabel)
 
@@ -182,9 +190,14 @@ func (r *Reconciler) ReconcileOnce(ctx context.Context) (*ReconcileResult, error
 				r.logger.Info("Schedule name changed, creating new before deleting old",
 					"oldName", existing.Name, "newName", desired.Name)
 				if _, err := r.veleroClient.CreateSchedule(ctx, desired); err == nil {
-					_ = r.veleroClient.DeleteSchedule(ctx, existing.Namespace, existing.Name)
 					result.CreatedSchedules++
-					result.DeletedSchedules++
+					if err := r.veleroClient.DeleteSchedule(ctx, existing.Namespace, existing.Name); err != nil {
+						r.logger.Error("Failed to delete old schedule after rename",
+							"schedule", existing.Name,
+							"error", err)
+					} else {
+						result.DeletedSchedules++
+					}
 					continue
 				}
 			}
@@ -224,6 +237,10 @@ func (r *Reconciler) ReconcileOnce(ctx context.Context) (*ReconcileResult, error
 			r.recordEvent("Warning", "ScheduleDeleted", fmt.Sprintf("Deleted schedule %s for %s", existing.Name, key))
 		}
 	}
+
+	// The gauge is derived from the observed state rather than accumulated
+	// deltas, so it is correct after a daemon restart.
+	result.SchedulesManaged = len(existingList) + result.CreatedSchedules - result.DeletedSchedules
 
 	r.logger.Info("Reconciliation cycle complete",
 		"duration", time.Since(start),

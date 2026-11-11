@@ -1,6 +1,6 @@
 # PVCGuardian
 
-**PVCGuardian** is a Kubernetes daemon that discovers Helm releases in opt-in namespaces and automatically generates, maintains, and reconciles [Velero](https://velero.io) `Schedule` resources to back up their Persistent Volume Claims (PVCs) with deterministic execution windows.
+**PVCGuardian** is a Kubernetes daemon that discovers Helm releases and selector-declared backup units in opt-in namespaces and automatically generates, maintains, and reconciles [Velero](https://velero.io) `Schedule` resources to back up their Persistent Volume Claims (PVCs) with deterministic execution windows.
 
 ---
 
@@ -10,6 +10,7 @@
 - **Opt-in Control**:
   - Scanning is cluster-wide by default across all namespaces (excluding `kube-system`).
   - Releases explicitly opt in by applying the label `pvcguardian.io/enabled: "true"` on their workloads (Deployment, StatefulSet, DaemonSet, CronJob, Job).
+- **Selector-based Backup Units**: Workloads that are not Helm-managed can declare their own backup scope with the annotation `pvcguardian.io/selector: "<key>=<value>[,<key>=<value>]"`. The selector is embedded directly in the Velero `Schedule`, so operator-managed PVCs are covered without a Helm release. Declaring the annotation implies opt-in. Only equality matching (`matchLabels`) is supported.
 - **Custom Schedule Presets via Annotations**:
   - A release can choose its schedule window by simply adding the annotation `pvcguardian.io/preset: "night"` on its workload, without altering the daemon's configuration.
 - **Explicit PVC Association**: PVCs that cannot be linked to a workload (operator-managed, manually created) can be attached to a release by labeling them `pvcguardian.io/release: <release-name>`. Their Schedule then selects them directly.
@@ -70,10 +71,27 @@ metrics:
 
 ---
 
+## Selector-based Backup Units
+
+For workloads that are not Helm-managed (operator-created resources, plain manifests), annotate the top-level workload with a label selector:
+
+```yaml
+metadata:
+  annotations:
+    pvcguardian.io/selector: "app.kubernetes.io/part-of=coroot"
+    pvcguardian.io/preset: "night"        # optional
+```
+
+The unit name is `app.kubernetes.io/instance` when present, otherwise the workload name. The resulting `Schedule` keeps the declared selector and the explicit `pvcguardian.io/release=<unit>` selector, so PVCs matched by the selector or labelled explicitly are backed up together. Invalid or conflicting selectors are logged and ignored; the affected PVCs are reported as uncovered.
+
+For a single PVC, the explicit `pvcguardian.io/release: <unit>` label still takes precedence.
+
+---
+
 ## Known Limitations
 
 1. **Workload-less Helm Charts**: Releases that deploy only ConfigMaps, Secrets, or CRDs (without any Deployment, StatefulSet, DaemonSet, CronJob, or Job) are invisible to PVCGuardian since it does not inspect Helm Secrets.
-2. **Missing `app.kubernetes.io/instance` Label**: PVCs without the `instance` label are still associated with a release when a workload's pod template references them (`persistentVolumeClaim.claimName`), when they follow a StatefulSet `volumeClaimTemplates` naming pattern, or when they carry an owner reference to a Helm-managed workload. For any remaining case (e.g. operator-managed PVCs), label the PVC with `pvcguardian.io/release: <release-name>` to attach it explicitly.
+2. **Missing `app.kubernetes.io/instance` Label**: PVCs without the `instance` label are still associated with a release when a workload's pod template references them (`persistentVolumeClaim.claimName`), when they follow a StatefulSet `volumeClaimTemplates` naming pattern, or when they carry an owner reference to a Helm-managed workload. For any remaining case (e.g. operator-managed PVCs), either declare a `pvcguardian.io/selector` annotation on the owning workload, or label the PVC with `pvcguardian.io/release: <release-name>` to attach it explicitly.
 
 ---
 
@@ -90,25 +108,6 @@ helm install pvcguardian deploy/chart/pvcguardian \
 
 ---
 
-## Release Process
-
-`deploy/chart/pvcguardian/Chart.yaml` is the single source of truth. Keep `version` and `appVersion` identical and bump both, then push to `main`:
-
-```yaml
-version: 0.2.2
-appVersion: "0.2.2"
-```
-
-On push, `.github/workflows/build-binary.yaml` resolves `v<appVersion>` and, when that tag does not exist yet:
-
-1. builds the multi-arch binaries and publishes them on a GitHub Release tagged `v<appVersion>`;
-2. pushes the container image to GHCR with the `v<appVersion>`, `<appVersion>` and `latest` tags;
-3. `.github/workflows/release-chart.yaml` packages and publishes the chart as `pvcguardian-<version>`.
-
-A push without a version bump only runs tests and code verification (no binary compilation, no image push, no release). Re-running the workflow manually with an explicit `tag` input republishes that tag.
-
----
-
 ## Prometheus Metrics
 
 | Metric | Type | Description |
@@ -117,7 +116,7 @@ A push without a version bump only runs tests and code verification (no binary c
 | `pvcguardian_reconcile_duration_seconds` | Histogram | Latency histogram for reconciliation passes |
 | `pvcguardian_schedules_managed` | Gauge | Number of Velero Schedules currently maintained |
 | `pvcguardian_releases_skipped_total{reason="policy"}` | Counter | Number of releases skipped (no PVC or opted out) |
-| `pvcguardian_uncovered_pvcs` | Gauge | Count of PVCs in opt-in namespaces not covered by any Helm release |
+| `pvcguardian_uncovered_pvcs` | Gauge | Count of PVCs in opt-in namespaces not covered by any backup unit |
 
 ---
 

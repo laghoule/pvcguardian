@@ -84,7 +84,7 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	reconciler := pvcguardian.NewReconciler(cfg, *configPath, discovery, veleroClient, nil, logger)
+	reconciler := pvcguardian.NewReconciler(cfg, *configPath, discovery, veleroClient, nil, metrics, logger)
 
 	if err := reconciler.RunLoop(ctx); err != nil && err != context.Canceled {
 		logger.Error("Reconciler exited with error", "error", err)

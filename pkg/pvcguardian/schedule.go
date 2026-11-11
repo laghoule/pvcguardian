@@ -156,6 +156,22 @@ func (b *ScheduleBuilder) BuildSchedule(rel k8s.DiscoveredRelease) (*velerov1.Sc
 	snapshotVolumes := false
 	defaultFsBackup := b.cfg.Velero.DefaultVolumesToFsBackup
 
+	// Selector-based units declare their own scope. The explicit PVC label is
+	// still honored so a manually attached PVC is never silently dropped.
+	// Helm-derived units keep the historical instance+release selectors.
+	var selectors []*metav1.LabelSelector
+	if len(rel.Selector) > 0 {
+		selectors = []*metav1.LabelSelector{
+			{MatchLabels: rel.Selector},
+			{MatchLabels: map[string]string{k8s.ReleaseLabel: rel.Name}},
+		}
+	} else {
+		selectors = []*metav1.LabelSelector{
+			{MatchLabels: map[string]string{k8s.HelmInstanceLabel: rel.Name}},
+			{MatchLabels: map[string]string{k8s.ReleaseLabel: rel.Name}},
+		}
+	}
+
 	sch := &velerov1.Schedule{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "velero.io/v1",
@@ -180,19 +196,8 @@ func (b *ScheduleBuilder) BuildSchedule(rel k8s.DiscoveredRelease) (*velerov1.Sc
 		Spec: velerov1.ScheduleSpec{
 			Schedule: cronExpr,
 			Template: velerov1.BackupSpec{
-				IncludedNamespaces: []string{rel.Namespace},
-				OrLabelSelectors: []*metav1.LabelSelector{
-					{
-						MatchLabels: map[string]string{
-							k8s.HelmInstanceLabel: rel.Name,
-						},
-					},
-					{
-						MatchLabels: map[string]string{
-							k8s.ReleaseLabel: rel.Name,
-						},
-					},
-				},
+				IncludedNamespaces:       []string{rel.Namespace},
+				OrLabelSelectors:         selectors,
 				TTL:                      metav1.Duration{Duration: ttl},
 				DefaultVolumesToFsBackup: &defaultFsBackup,
 				SnapshotVolumes:          &snapshotVolumes,

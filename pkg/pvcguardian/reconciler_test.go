@@ -11,6 +11,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/laghoule/pvcguardian/pkg/config"
 	"github.com/laghoule/pvcguardian/pkg/k8s"
 )
@@ -65,8 +67,9 @@ func TestReconcileOnceCreatesAndDeletesOrphans(t *testing.T) {
 
 	discovery := k8s.NewDiscovery(kubeClient, nil)
 	veleroClient := k8s.NewFakeVeleroClient()
+	metrics := NewMetrics()
 
-	reconciler := NewReconciler(&cfg, "", discovery, veleroClient, nil, nil)
+	reconciler := NewReconciler(&cfg, "", discovery, veleroClient, nil, metrics, nil)
 
 	// FIRST CYCLE
 	res, err := reconciler.ReconcileOnce(context.Background())
@@ -79,6 +82,12 @@ func TestReconcileOnceCreatesAndDeletesOrphans(t *testing.T) {
 	}
 	if res.SkippedReleases != 1 {
 		t.Errorf("expected 1 skipped release (stateless), got %d", res.SkippedReleases)
+	}
+	if res.SchedulesManaged != 1 {
+		t.Errorf("expected 1 managed schedule, got %d", res.SchedulesManaged)
+	}
+	if got := gaugeValue(t, metrics.SchedulesManaged); got != 1 {
+		t.Errorf("expected schedules_managed gauge 1, got %v", got)
 	}
 	if len(veleroClient.Schedules) != 1 {
 		t.Fatalf("expected 1 schedule in velero client, got %d", len(veleroClient.Schedules))
@@ -97,6 +106,26 @@ func TestReconcileOnceCreatesAndDeletesOrphans(t *testing.T) {
 	if res2.CreatedSchedules != 0 || res2.UpdatedSchedules != 0 || res2.DeletedSchedules != 0 {
 		t.Errorf("expected 0 modifications on second run, got %+v", res2)
 	}
+	if res2.SchedulesManaged != 1 {
+		t.Errorf("expected 1 managed schedule on second run, got %d", res2.SchedulesManaged)
+	}
+
+	// RESTART: a fresh reconciler must count the schedule created earlier,
+	// instead of starting its gauge at zero.
+	restarted := NewReconciler(&cfg, "", discovery, veleroClient, nil, metrics, nil)
+	resRestart, err := restarted.ReconcileOnce(context.Background())
+	if err != nil {
+		t.Fatalf("restart reconcile failed: %v", err)
+	}
+	if resRestart.SchedulesManaged != 1 {
+		t.Errorf("expected 1 managed schedule after restart, got %d", resRestart.SchedulesManaged)
+	}
+	if resRestart.CreatedSchedules != 0 || resRestart.UpdatedSchedules != 0 || resRestart.DeletedSchedules != 0 {
+		t.Errorf("expected no modifications after restart, got %+v", resRestart)
+	}
+	if got := gaugeValue(t, metrics.SchedulesManaged); got != 1 {
+		t.Errorf("expected schedules_managed gauge 1 after restart, got %v", got)
+	}
 
 	// THIRD CYCLE: remove the PVC -> release now has no PVCs -> schedule should be deleted as orphaned
 	err = kubeClient.CoreV1().PersistentVolumeClaims("prod").Delete(context.Background(), "web-pvc", metav1.DeleteOptions{})
@@ -110,6 +139,12 @@ func TestReconcileOnceCreatesAndDeletesOrphans(t *testing.T) {
 	}
 	if res3.DeletedSchedules != 1 {
 		t.Errorf("expected 1 deleted schedule, got %d", res3.DeletedSchedules)
+	}
+	if res3.SchedulesManaged != 0 {
+		t.Errorf("expected 0 managed schedules after orphan deletion, got %d", res3.SchedulesManaged)
+	}
+	if got := gaugeValue(t, metrics.SchedulesManaged); got != 0 {
+		t.Errorf("expected schedules_managed gauge 0 after orphan deletion, got %v", got)
 	}
 	if len(veleroClient.Schedules) != 0 {
 		t.Errorf("expected 0 schedules remaining, got %d", len(veleroClient.Schedules))
@@ -151,7 +186,7 @@ func TestReconcileUpdatesOnConfigChange(t *testing.T) {
 	discovery := k8s.NewDiscovery(kubeClient, nil)
 	veleroClient := k8s.NewFakeVeleroClient()
 
-	reconciler := NewReconciler(&cfg, "", discovery, veleroClient, nil, nil)
+	reconciler := NewReconciler(&cfg, "", discovery, veleroClient, nil, nil, nil)
 	_, _ = reconciler.ReconcileOnce(context.Background())
 
 	// Change retention to 10d
@@ -169,4 +204,23 @@ func TestReconcileUpdatesOnConfigChange(t *testing.T) {
 	if sch == nil || sch.Spec.Template.TTL.Duration != 10*24*time.Hour {
 		t.Errorf("expected updated TTL 10d, got %v", sch.Spec.Template.TTL.Duration)
 	}
+}
+
+// gaugeValue reads the current value of a gauge without pulling in the
+// prometheus testutil package.
+func gaugeValue(t *testing.T, g prometheus.Gauge) float64 {
+	t.Helper()
+
+	reg := prometheus.NewRegistry()
+	if err := reg.Register(g); err != nil {
+		t.Fatalf("registering gauge: %v", err)
+	}
+	families, err := reg.Gather()
+	if err != nil {
+		t.Fatalf("gathering metrics: %v", err)
+	}
+	if len(families) != 1 || len(families[0].Metric) != 1 {
+		t.Fatalf("unexpected metric families: %+v", families)
+	}
+	return families[0].Metric[0].GetGauge().GetValue()
 }

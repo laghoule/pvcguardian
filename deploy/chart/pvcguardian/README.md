@@ -1,6 +1,6 @@
 # PVCGuardian Helm Chart
 
-This Helm chart installs **PVCGuardian**, an automated Kubernetes daemon that discovers Helm releases in opt-in namespaces and maintains [Velero](https://velero.io) `Schedule` resources to back up their Persistent Volume Claims (PVCs) with spread execution windows.
+This Helm chart installs **PVCGuardian**, an automated Kubernetes daemon that discovers Helm releases and selector-declared backup units in opt-in namespaces and maintains [Velero](https://velero.io) `Schedule` resources to back up their Persistent Volume Claims (PVCs) with spread execution windows.
 
 ---
 

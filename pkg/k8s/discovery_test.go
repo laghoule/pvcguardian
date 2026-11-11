@@ -272,6 +272,142 @@ func TestDiscoverReleasesViaWorkloadVolumesAndOwnerReferences(t *testing.T) {
 	}
 }
 
+func TestDiscoverReleasesSelectorUnit(t *testing.T) {
+	client := fake.NewSimpleClientset(
+		// Non-Helm workload declaring its own backup scope.
+		&appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "coroot-operator",
+				Namespace: "prod",
+				Labels: map[string]string{
+					"app.kubernetes.io/part-of": "coroot",
+				},
+				Annotations: map[string]string{
+					SelectorAnnotation: "app.kubernetes.io/part-of=coroot",
+					PresetAnnotation:   "night",
+				},
+			},
+		},
+		&corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "coroot-clickhouse-0",
+				Namespace: "prod",
+				Labels: map[string]string{
+					"app.kubernetes.io/part-of":   "coroot",
+					"app.kubernetes.io/component": "clickhouse",
+				},
+			},
+		},
+		// Explicitly attached despite not matching the selector.
+		&corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "explicit-coroot",
+				Namespace: "prod",
+				Labels:    map[string]string{ReleaseLabel: "coroot-operator"},
+			},
+		},
+		&corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "unrelated",
+				Namespace: "prod",
+				Labels:    map[string]string{"app.kubernetes.io/part-of": "other"},
+			},
+		},
+	)
+
+	releases, uncovered, err := NewDiscovery(client, nil).DiscoverReleases(context.Background(), "prod")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(releases) != 1 {
+		t.Fatalf("expected 1 release, got %d: %+v", len(releases), releases)
+	}
+
+	rel := findRelease(releases, "coroot-operator")
+	if rel == nil {
+		t.Fatalf("expected coroot-operator release, got %+v", releases)
+	}
+	if !rel.OptIn {
+		t.Errorf("expected a selector-based unit to be opted in")
+	}
+	if got := rel.Selector["app.kubernetes.io/part-of"]; got != "coroot" {
+		t.Errorf("expected selector part-of=coroot, got %q", got)
+	}
+	if rel.AnnotatedPreset != "night" {
+		t.Errorf("expected night preset, got %q", rel.AnnotatedPreset)
+	}
+
+	wantPVCs := []string{"coroot-clickhouse-0", "explicit-coroot"}
+	if len(rel.PVCs) != len(wantPVCs) {
+		t.Fatalf("expected PVCs %v, got %v", wantPVCs, rel.PVCs)
+	}
+	for i := range wantPVCs {
+		if rel.PVCs[i] != wantPVCs[i] {
+			t.Errorf("expected PVCs %v, got %v", wantPVCs, rel.PVCs)
+		}
+	}
+
+	if len(uncovered) != 1 || uncovered[0] != "unrelated" {
+		t.Errorf("expected uncovered [unrelated], got %v", uncovered)
+	}
+}
+
+func TestDiscoverReleasesSelectorErrors(t *testing.T) {
+	client := fake.NewSimpleClientset(
+		// Invalid selector: the workload is ignored.
+		&appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "invalid-selector",
+				Namespace: "prod",
+				Annotations: map[string]string{
+					SelectorAnnotation: "app",
+				},
+			},
+		},
+		// Two workloads share a unit name but declare different selectors.
+		&appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "conflict",
+				Namespace: "prod",
+				Labels:    map[string]string{"app.kubernetes.io/part-of": "a"},
+				Annotations: map[string]string{
+					SelectorAnnotation: "app.kubernetes.io/part-of=a",
+				},
+			},
+		},
+		&appsv1.StatefulSet{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "conflict",
+				Namespace: "prod",
+				Labels:    map[string]string{"app.kubernetes.io/part-of": "b"},
+				Annotations: map[string]string{
+					SelectorAnnotation: "app.kubernetes.io/part-of=b",
+				},
+			},
+		},
+		&corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "conflict-pvc",
+				Namespace: "prod",
+				Labels:    map[string]string{"app.kubernetes.io/part-of": "a"},
+			},
+		},
+	)
+
+	releases, uncovered, err := NewDiscovery(client, nil).DiscoverReleases(context.Background(), "prod")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(releases) != 0 {
+		t.Fatalf("expected no releases, got %+v", releases)
+	}
+	if len(uncovered) != 1 || uncovered[0] != "conflict-pvc" {
+		t.Errorf("expected uncovered [conflict-pvc], got %v", uncovered)
+	}
+}
+
 func findRelease(releases []DiscoveredRelease, name string) *DiscoveredRelease {
 	for i := range releases {
 		if releases[i].Name == name {

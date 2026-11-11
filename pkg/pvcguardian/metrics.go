@@ -61,7 +61,7 @@ func NewMetrics() *Metrics {
 		UncoveredPVCs: prometheus.NewGauge(
 			prometheus.GaugeOpts{
 				Name: "pvcguardian_uncovered_pvcs",
-				Help: "Number of PVCs in opt-in namespaces that are not covered by any Helm release.",
+				Help: "Number of PVCs in opt-in namespaces that are not covered by any backup unit.",
 			},
 		),
 	}
@@ -119,7 +119,7 @@ func (m *Metrics) ObserveCycle(duration time.Duration, res *ReconcileResult, err
 	m.ReconcileTotal.WithLabelValues("success").Inc()
 
 	if res != nil {
-		m.SchedulesManaged.Add(float64(res.CreatedSchedules - res.DeletedSchedules))
+		m.SchedulesManaged.Set(float64(res.SchedulesManaged))
 		m.UncoveredPVCs.Set(float64(res.UncoveredPVCs))
 		if res.SkippedReleases > 0 {
 			m.ReleasesSkippedTotal.WithLabelValues("policy").Add(float64(res.SkippedReleases))

@@ -16,6 +16,7 @@ func TestMetricsObserveAndServer(t *testing.T) {
 	res := &ReconcileResult{
 		CreatedSchedules: 2,
 		DeletedSchedules: 0,
+		SchedulesManaged: 2,
 		SkippedReleases:  1,
 		UncoveredPVCs:    3,
 	}

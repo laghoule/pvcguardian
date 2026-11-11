@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"sort"
 	"strings"
 
@@ -26,6 +27,10 @@ const (
 	PresetAnnotation = "pvcguardian.io/preset"
 	// ReleaseLabel explicitly attaches a PVC to a Helm release by name.
 	ReleaseLabel = "pvcguardian.io/release"
+	// SelectorAnnotation declares a label selector (key=value[,key=value])
+	// that defines a backup unit. It works on Helm-managed and non-Helm
+	// workloads alike, and implies opt-in.
+	SelectorAnnotation = "pvcguardian.io/selector"
 )
 
 // DiscoveredRelease represents an identified Helm release.
@@ -33,9 +38,10 @@ type DiscoveredRelease struct {
 	Namespace       string
 	Name            string
 	Chart           string
-	PVCs            []string // PVC names belonging to this release
-	OptIn           bool     // true if explicitly opted in via label="true"
-	AnnotatedPreset string   // preset specified in pvcguardian.io/preset annotation
+	PVCs            []string          // PVC names belonging to this release
+	OptIn           bool              // true if explicitly opted in via label="true"
+	AnnotatedPreset string            // preset specified in pvcguardian.io/preset annotation
+	Selector        map[string]string // matchLabels from pvcguardian.io/selector, nil for Helm-derived units
 }
 
 // Discovery holds context and clients needed to scan workloads and PVCs.
@@ -80,36 +86,78 @@ func (d *Discovery) ListScannableNamespaces(ctx context.Context, excluded []stri
 // DiscoverReleases scans workloads in a namespace and associates their PVCs.
 func (d *Discovery) DiscoverReleases(ctx context.Context, namespace string) ([]DiscoveredRelease, []string, error) {
 	type releaseMeta struct {
-		chart    string
-		optIn    bool
-		preset   string
-		claims   map[string]struct{}
-		prefixes []string
+		chart            string
+		optIn            bool
+		preset           string
+		claims           map[string]struct{}
+		prefixes         []string
+		selector         map[string]string
+		selectorRaw      string
+		selectorConflict bool
 	}
 	releases := make(map[string]*releaseMeta)
 	workloadOwner := make(map[types.UID]string)
 
 	recordWorkload := func(kind, name string, meta metav1.ObjectMeta, claimNames, claimPrefixes []string) {
-		if meta.Labels == nil {
-			return
+		rawSelector := ""
+		if meta.Annotations != nil {
+			rawSelector = strings.TrimSpace(meta.Annotations[SelectorAnnotation])
 		}
-		if !strings.EqualFold(meta.Labels[HelmManagedByLabel], HelmManagedByValue) {
+
+		// A selector annotation is enough to declare a backup unit, even
+		// when the workload is not Helm-managed.
+		if !strings.EqualFold(meta.Labels[HelmManagedByLabel], HelmManagedByValue) && rawSelector == "" {
 			return
 		}
 
 		instance := meta.Labels[HelmInstanceLabel]
 		if instance == "" {
-			d.logger.Warn("Helm-managed workload is missing instance label",
-				"namespace", namespace,
-				"kind", kind,
-				"name", name)
-			return
+			if rawSelector == "" {
+				d.logger.Warn("Helm-managed workload is missing instance label",
+					"namespace", namespace,
+					"kind", kind,
+					"name", name)
+				return
+			}
+			instance = name
+		}
+
+		var selector map[string]string
+		if rawSelector != "" {
+			var err error
+			selector, err = parseSelectorAnnotation(rawSelector)
+			if err != nil {
+				d.logger.Warn("Ignoring workload with invalid selector annotation",
+					"namespace", namespace,
+					"kind", kind,
+					"name", name,
+					"annotation", SelectorAnnotation,
+					"error", err)
+				return
+			}
 		}
 
 		rm, exists := releases[instance]
 		if !exists {
 			rm = &releaseMeta{claims: make(map[string]struct{})}
 			releases[instance] = rm
+		}
+
+		if selector != nil {
+			switch {
+			case rm.selector == nil:
+				rm.selector = selector
+				rm.selectorRaw = rawSelector
+			case !maps.Equal(rm.selector, selector):
+				rm.selectorConflict = true
+				d.logger.Warn("Conflicting selectors for the same backup unit",
+					"namespace", namespace,
+					"unit", instance,
+					"existing", rm.selectorRaw,
+					"conflicting", rawSelector)
+			}
+			// Declaring a selector is an explicit opt-in.
+			rm.optIn = true
 		}
 
 		if meta.UID != "" {
@@ -184,6 +232,18 @@ func (d *Discovery) DiscoverReleases(ctx context.Context, namespace string) ([]D
 		recordWorkload("Job", item.Name, item.ObjectMeta, claimNamesFromVolumes(item.Spec.Template.Spec.Volumes), nil)
 	}
 
+	// Drop units whose workloads declared incompatible selectors. Their PVCs
+	// will fall through to the uncovered list instead of silently belonging to
+	// no unit.
+	for name, rm := range releases {
+		if rm.selectorConflict {
+			d.logger.Warn("Skipping backup unit with conflicting selectors",
+				"namespace", namespace,
+				"unit", name)
+			delete(releases, name)
+		}
+	}
+
 	pvcList, err := d.kubeClient.CoreV1().PersistentVolumeClaims(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, nil, fmt.Errorf("listing PVCs in %s: %w", namespace, err)
@@ -193,54 +253,88 @@ func (d *Discovery) DiscoverReleases(ctx context.Context, namespace string) ([]D
 	var uncoveredPVCs []string
 
 	for _, pvc := range pvcList.Items {
-		matched := make(map[string]struct{})
-
 		// Explicit per-PVC release association takes precedence.
 		if release := strings.TrimSpace(pvc.Labels[ReleaseLabel]); release != "" {
 			if _, ok := releases[release]; ok {
-				matched[release] = struct{}{}
-			} else {
-				d.logger.Warn("PVC references an unknown release",
-					"namespace", namespace,
-					"pvc", pvc.Name,
-					"release", release,
-					"label", ReleaseLabel)
+				pvcByRelease[release] = append(pvcByRelease[release], pvc.Name)
+				continue
+			}
+			d.logger.Warn("PVC references an unknown release",
+				"namespace", namespace,
+				"pvc", pvc.Name,
+				"release", release,
+				"label", ReleaseLabel)
+		}
+
+		matched := make(map[string]struct{})
+
+		// Selector-based units match PVCs directly by their labels. This is
+		// the same criterion the Velero Schedule uses, so discovery and
+		// backup stay consistent.
+		for name, rm := range releases {
+			if rm.selector != nil && matchesMatchLabels(rm.selector, pvc.Labels) {
+				matched[name] = struct{}{}
 			}
 		}
 
-		if len(matched) == 0 {
-			if instance := pvc.Labels[HelmInstanceLabel]; instance != "" {
-				if _, ok := releases[instance]; ok {
-					matched[instance] = struct{}{}
-				}
+		// Legacy Helm association only applies to units without an explicit
+		// selector.
+		legacyMatched := make(map[string]struct{})
+		if instance := pvc.Labels[HelmInstanceLabel]; instance != "" {
+			if rm, ok := releases[instance]; ok && rm.selector == nil {
+				legacyMatched[instance] = struct{}{}
 			}
 		}
 
-		if len(matched) == 0 {
+		if len(legacyMatched) == 0 {
 			for name, rm := range releases {
+				if rm.selector != nil {
+					continue
+				}
 				if _, ok := rm.claims[pvc.Name]; ok {
-					matched[name] = struct{}{}
+					legacyMatched[name] = struct{}{}
 				}
 			}
 		}
 
-		if len(matched) == 0 {
+		if len(legacyMatched) == 0 {
 			for name, rm := range releases {
+				if rm.selector != nil {
+					continue
+				}
 				for _, prefix := range rm.prefixes {
 					if matchesStatefulSetClaim(pvc.Name, prefix) {
-						matched[name] = struct{}{}
+						legacyMatched[name] = struct{}{}
 						break
 					}
 				}
 			}
 		}
 
-		if len(matched) == 0 {
+		if len(legacyMatched) == 0 {
 			for _, ref := range pvc.OwnerReferences {
 				if name, ok := workloadOwner[ref.UID]; ok {
-					matched[name] = struct{}{}
+					if rm, ok := releases[name]; ok && rm.selector == nil {
+						legacyMatched[name] = struct{}{}
+					}
 				}
 			}
+		}
+
+		for name := range legacyMatched {
+			matched[name] = struct{}{}
+		}
+
+		if len(matched) > 1 {
+			names := make([]string, 0, len(matched))
+			for name := range matched {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			d.logger.Warn("PVC is associated with multiple backup units",
+				"namespace", namespace,
+				"pvc", pvc.Name,
+				"units", names)
 		}
 
 		if len(matched) == 0 {
@@ -264,6 +358,7 @@ func (d *Discovery) DiscoverReleases(ctx context.Context, namespace string) ([]D
 			PVCs:            pvcs,
 			OptIn:           meta.optIn,
 			AnnotatedPreset: meta.preset,
+			Selector:        maps.Clone(meta.selector),
 		})
 	}
 
