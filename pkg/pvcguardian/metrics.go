@@ -19,6 +19,8 @@ type Metrics struct {
 	ReconcileTotal           *prometheus.CounterVec
 	ReconcileDurationSeconds prometheus.Histogram
 	SchedulesManaged         prometheus.Gauge
+	SchedulesUnmanaged       prometheus.Gauge
+	ReleasesSkipped          *prometheus.GaugeVec
 	ReleasesSkippedTotal     *prometheus.CounterVec
 	UncoveredPVCs            prometheus.Gauge
 	registry                 *prometheus.Registry
@@ -51,17 +53,30 @@ func NewMetrics() *Metrics {
 				Help: "Current number of Velero Schedules actively maintained by PVCGuardian.",
 			},
 		),
+		SchedulesUnmanaged: prometheus.NewGauge(
+			prometheus.GaugeOpts{
+				Name: "pvcguardian_schedules_unmanaged",
+				Help: "Current number of Velero Schedules in the Velero namespace not managed by PVCGuardian.",
+			},
+		),
+		ReleasesSkipped: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "pvcguardian_releases_skipped",
+				Help: "Number of backup units (Helm releases or selector units) skipped during the last reconciliation cycle, partitioned by reason.",
+			},
+			[]string{"reason"}, // "opt_out" | "no_pvc"
+		),
 		ReleasesSkippedTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "pvcguardian_releases_skipped_total",
-				Help: "Total number of releases skipped during discovery.",
+				Help: "Total number of skip decisions for backup units, partitioned by reason.",
 			},
-			[]string{"reason"}, // "no_pvc" | "opt_out"
+			[]string{"reason"}, // "opt_out" | "no_pvc"
 		),
 		UncoveredPVCs: prometheus.NewGauge(
 			prometheus.GaugeOpts{
 				Name: "pvcguardian_uncovered_pvcs",
-				Help: "Number of PVCs in opt-in namespaces that are not covered by any backup unit.",
+				Help: "Number of PVCs in scanned namespaces that are not covered by any backup unit.",
 			},
 		),
 	}
@@ -70,6 +85,8 @@ func NewMetrics() *Metrics {
 		m.ReconcileTotal,
 		m.ReconcileDurationSeconds,
 		m.SchedulesManaged,
+		m.SchedulesUnmanaged,
+		m.ReleasesSkipped,
 		m.ReleasesSkippedTotal,
 		m.UncoveredPVCs,
 	)
@@ -120,9 +137,20 @@ func (m *Metrics) ObserveCycle(duration time.Duration, res *ReconcileResult, err
 
 	if res != nil {
 		m.SchedulesManaged.Set(float64(res.SchedulesManaged))
+		m.SchedulesUnmanaged.Set(float64(res.SchedulesUnmanaged))
 		m.UncoveredPVCs.Set(float64(res.UncoveredPVCs))
-		if res.SkippedReleases > 0 {
-			m.ReleasesSkippedTotal.WithLabelValues("policy").Add(float64(res.SkippedReleases))
+
+		// Gauges are set (not accumulated) so they reflect the last cycle and
+		// do not depend on the reconcile interval. Both reasons are always
+		// written to avoid stale values.
+		m.ReleasesSkipped.WithLabelValues("opt_out").Set(float64(res.SkippedOptOut))
+		m.ReleasesSkipped.WithLabelValues("no_pvc").Set(float64(res.SkippedNoPVC))
+
+		if res.SkippedOptOut > 0 {
+			m.ReleasesSkippedTotal.WithLabelValues("opt_out").Add(float64(res.SkippedOptOut))
+		}
+		if res.SkippedNoPVC > 0 {
+			m.ReleasesSkippedTotal.WithLabelValues("no_pvc").Add(float64(res.SkippedNoPVC))
 		}
 	}
 }

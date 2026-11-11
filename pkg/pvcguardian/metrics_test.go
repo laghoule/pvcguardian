@@ -14,11 +14,13 @@ func TestMetricsObserveAndServer(t *testing.T) {
 
 	// Observe a cycle
 	res := &ReconcileResult{
-		CreatedSchedules: 2,
-		DeletedSchedules: 0,
-		SchedulesManaged: 2,
-		SkippedReleases:  1,
-		UncoveredPVCs:    3,
+		CreatedSchedules:   2,
+		DeletedSchedules:   0,
+		SchedulesManaged:   2,
+		SchedulesUnmanaged: 1,
+		SkippedOptOut:      1,
+		SkippedNoPVC:       2,
+		UncoveredPVCs:      3,
 	}
 	m.ObserveCycle(150*time.Millisecond, res, nil)
 
@@ -60,8 +62,23 @@ func TestMetricsObserveAndServer(t *testing.T) {
 	if !containsString(bodyStr, "pvcguardian_schedules_managed 2") {
 		t.Errorf("expected pvcguardian_schedules_managed 2 in metrics output")
 	}
+	if !containsString(bodyStr, "pvcguardian_schedules_unmanaged 1") {
+		t.Errorf("expected pvcguardian_schedules_unmanaged 1 in metrics output")
+	}
 	if !containsString(bodyStr, "pvcguardian_uncovered_pvcs 3") {
 		t.Errorf("expected pvcguardian_uncovered_pvcs 3 in metrics output")
+	}
+	if !containsString(bodyStr, `pvcguardian_releases_skipped{reason="opt_out"} 1`) {
+		t.Errorf("expected pvcguardian_releases_skipped{reason=opt_out} 1 in metrics output")
+	}
+	if !containsString(bodyStr, `pvcguardian_releases_skipped{reason="no_pvc"} 2`) {
+		t.Errorf("expected pvcguardian_releases_skipped{reason=no_pvc} 2 in metrics output")
+	}
+	if !containsString(bodyStr, `pvcguardian_releases_skipped_total{reason="opt_out"} 1`) {
+		t.Errorf("expected pvcguardian_releases_skipped_total{reason=opt_out} 1 in metrics output")
+	}
+	if !containsString(bodyStr, `pvcguardian_releases_skipped_total{reason="no_pvc"} 2`) {
+		t.Errorf("expected pvcguardian_releases_skipped_total{reason=no_pvc} 2 in metrics output")
 	}
 }
 
