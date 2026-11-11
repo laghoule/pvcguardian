@@ -142,6 +142,12 @@ func TestInvalidConfigFailsValidation(t *testing.T) {
 			},
 		},
 		{
+			name: "non-UTC timezone",
+			mutator: func(c *Config) {
+				c.Schedules.Timezone = "Europe/Paris"
+			},
+		},
+		{
 			name: "interval too short",
 			mutator: func(c *Config) {
 				c.Reconcile.Interval = 2 * time.Second

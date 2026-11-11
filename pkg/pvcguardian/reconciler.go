@@ -5,11 +5,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"reflect"
 	"time"
 
 	velerov1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	corev1 "k8s.io/api/core/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/client-go/tools/record"
 
 	"github.com/laghoule/pvcguardian/pkg/config"
@@ -36,8 +36,15 @@ type ReconcileResult struct {
 	UpdatedSchedules   int
 	DeletedSchedules   int
 	SchedulesManaged   int
-	SkippedReleases    int
+	SchedulesUnmanaged int
+	SkippedOptOut      int
+	SkippedNoPVC       int
 	UncoveredPVCs      int
+}
+
+// SkippedTotal returns the total number of releases skipped in the cycle.
+func (r *ReconcileResult) SkippedTotal() int {
+	return r.SkippedOptOut + r.SkippedNoPVC
 }
 
 // NewReconciler creates a Reconciler.
@@ -79,7 +86,7 @@ func (r *Reconciler) reloadConfig() {
 	r.logger.Debug("Configuration reloaded successfully")
 }
 
-// ReconcileOnce performs a single pass over opt-in namespaces, discovers releases,
+// ReconcileOnce performs a single pass over scanned namespaces, discovers releases,
 // creates/updates desired schedules, and deletes orphaned ones.
 func (r *Reconciler) ReconcileOnce(ctx context.Context) (result *ReconcileResult, err error) {
 	r.reloadConfig()
@@ -126,14 +133,14 @@ func (r *Reconciler) ReconcileOnce(ctx context.Context) (result *ReconcileResult
 			if !rel.OptIn {
 				r.logger.Debug("Skipping release without opt-in label",
 					"namespace", ns, "release", rel.Name)
-				result.SkippedReleases++
+				result.SkippedOptOut++
 				continue
 			}
 
 			if r.cfg.Discovery.RequirePVC && len(rel.PVCs) == 0 {
 				r.logger.Info("Skipping release with no PersistentVolumeClaims (requirePVC=true)",
 					"namespace", ns, "release", rel.Name)
-				result.SkippedReleases++
+				result.SkippedNoPVC++
 				continue
 			}
 
@@ -150,11 +157,21 @@ func (r *Reconciler) ReconcileOnce(ctx context.Context) (result *ReconcileResult
 	}
 	result.UncoveredPVCs = totalUncovered
 
-	labelSel := fmt.Sprintf("%s=%s", ManagedByLabel, ManagedByValue)
-	existingList, err := r.veleroClient.ListSchedules(ctx, r.cfg.Velero.Namespace, labelSel)
+	// List every schedule in the Velero namespace so unmanaged ones (created
+	// manually or by other tooling) can be reported, then keep only the
+	// PVCGuardian-managed ones for reconciliation.
+	allSchedules, err := r.veleroClient.ListSchedules(ctx, r.cfg.Velero.Namespace, "")
 	if err != nil {
 		return nil, fmt.Errorf("listing existing schedules: %w", err)
 	}
+
+	existingList := make([]velerov1.Schedule, 0, len(allSchedules))
+	for _, sch := range allSchedules {
+		if sch.Labels[ManagedByLabel] == ManagedByValue {
+			existingList = append(existingList, sch)
+		}
+	}
+	result.SchedulesUnmanaged = len(allSchedules) - len(existingList)
 
 	existingBySource := make(map[string]*velerov1.Schedule)
 	for i := range existingList {
@@ -249,13 +266,16 @@ func (r *Reconciler) ReconcileOnce(ctx context.Context) (result *ReconcileResult
 		"created", result.CreatedSchedules,
 		"updated", result.UpdatedSchedules,
 		"deleted", result.DeletedSchedules,
-		"skipped", result.SkippedReleases,
+		"managedSchedules", result.SchedulesManaged,
+		"unmanagedSchedules", result.SchedulesUnmanaged,
+		"skipped", result.SkippedTotal(),
 		"uncoveredPVCs", result.UncoveredPVCs)
 
 	return result, nil
 }
 
-// needsUpdate checks whether meaningful fields (schedule, ttl, annotations) differ.
+// needsUpdate checks whether any field that affects backup behavior differs
+// between the existing and desired Schedule.
 func (r *Reconciler) needsUpdate(existing, desired *velerov1.Schedule) bool {
 	if existing.Spec.Schedule != desired.Spec.Schedule {
 		return true
@@ -273,7 +293,25 @@ func (r *Reconciler) needsUpdate(existing, desired *velerov1.Schedule) bool {
 		return true
 	}
 
-	if !reflect.DeepEqual(existing.Spec.Template.IncludedNamespaces, desired.Spec.Template.IncludedNamespaces) {
+	if !apiequality.Semantic.DeepEqual(existing.Spec.Template.IncludedNamespaces, desired.Spec.Template.IncludedNamespaces) {
+		return true
+	}
+
+	// Selectors are the actual backup scope for selector-based units. A
+	// changed annotation must be applied to the existing Schedule.
+	if !apiequality.Semantic.DeepEqual(existing.Spec.Template.LabelSelector, desired.Spec.Template.LabelSelector) {
+		return true
+	}
+
+	if !apiequality.Semantic.DeepEqual(existing.Spec.Template.OrLabelSelectors, desired.Spec.Template.OrLabelSelectors) {
+		return true
+	}
+
+	if !apiequality.Semantic.DeepEqual(existing.Spec.Template.DefaultVolumesToFsBackup, desired.Spec.Template.DefaultVolumesToFsBackup) {
+		return true
+	}
+
+	if !apiequality.Semantic.DeepEqual(existing.Spec.Template.SnapshotVolumes, desired.Spec.Template.SnapshotVolumes) {
 		return true
 	}
 

@@ -1,3 +1,6 @@
+{{- if gt (int .Values.replicaCount) 1 }}
+{{- fail "pvcguardian does not support replicaCount > 1 yet (no leader election)" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -35,6 +38,7 @@ spec:
             {{- toYaml .Values.securityContext | nindent 12 }}
           args:
             - "--config=/etc/pvcguardian/config.yaml"
+          {{- if .Values.config.metrics.enabled }}
           ports:
             - name: metrics
               containerPort: 8080
@@ -51,6 +55,7 @@ spec:
               port: metrics
             initialDelaySeconds: 5
             periodSeconds: 10
+          {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:

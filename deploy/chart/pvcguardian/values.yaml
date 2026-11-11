@@ -1,4 +1,4 @@
-replicaCount: 1
+replicaCount: 1 # Must stay 1: PVCGuardian has no leader election yet.
 
 image:
   repository: ghcr.io/laghoule/pvcguardian
@@ -56,7 +56,7 @@ config:
     defaultVolumesToFsBackup: true
 
   schedules:
-    timezone: UTC
+    timezone: UTC # Only UTC is supported; Velero cron expressions are UTC-based.
     retention: 5d
     windows:
       day:

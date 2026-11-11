@@ -1,6 +1,6 @@
 # PVCGuardian Helm Chart
 
-This Helm chart installs **PVCGuardian**, an automated Kubernetes daemon that discovers Helm releases and selector-declared backup units in opt-in namespaces and maintains [Velero](https://velero.io) `Schedule` resources to back up their Persistent Volume Claims (PVCs) with spread execution windows.
+This Helm chart installs **PVCGuardian**, an automated Kubernetes daemon that discovers Helm releases and selector-declared backup units across scanned namespaces and maintains [Velero](https://velero.io) `Schedule` resources to back up their Persistent Volume Claims (PVCs) with spread execution windows.
 
 ---
 
@@ -40,7 +40,7 @@ The following table lists the configurable parameters of the chart and their def
 
 | Parameter | Description | Default |
 |---|---|---|
-| `replicaCount` | Number of PVCGuardian daemon replicas (runs as active/active or single instance) | `1` |
+| `replicaCount` | Number of PVCGuardian daemon replicas (keep at `1`; there is no leader election yet) | `1` |
 | `image.repository` | Image repository | `ghcr.io/laghoule/pvcguardian` |
 | `image.tag` | Image tag (defaults to `v` + `Chart.appVersion`) | `""` |
 | `image.pullPolicy` | Image pull policy | `IfNotPresent` |
@@ -58,7 +58,7 @@ The following table lists the configurable parameters of the chart and their def
 | `config.velero.namespace` | Namespace where Velero and its Schedules reside | `velero` |
 | `config.velero.storageLocation` | Velero BackupStorageLocation (empty = Velero default) | `""` |
 | `config.velero.defaultVolumesToFsBackup` | Use Kopia filesystem backup for all volumes | `true` |
-| `config.schedules.timezone` | Timezone for windows calculation | `UTC` |
+| `config.schedules.timezone` | Reserved; windows are always evaluated in UTC | `UTC` |
 | `config.schedules.retention` | Backup retention duration (`5d`, `120h`, `30m`) | `5d` |
 | `config.schedules.windows.day.from` | Start of day window (HH:MM) | `10:00` |
 | `config.schedules.windows.day.to` | End of day window (HH:MM) | `16:00` |

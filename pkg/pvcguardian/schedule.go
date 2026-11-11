@@ -115,7 +115,9 @@ func (b *ScheduleBuilder) CalculateCron(namespace, release, preset string) (cron
 		hashNum = (hashNum << 4) | fromHex(hash[i])
 	}
 
-	offset := int(hashNum % uint32(windowDuration))
+	// windowDuration is validated by TimeWindow.WindowMinutes to be in
+	// (0, 1440], so the uint32 conversion cannot overflow.
+	offset := int(hashNum % uint32(windowDuration)) // #nosec G115 -- bounded window duration (<= 1440 minutes).
 	targetMinuteOfDay := mFrom + offset
 
 	hour := targetMinuteOfDay / 60

@@ -146,7 +146,9 @@ func Load(path string) (*Config, error) {
 		return &cfg, nil
 	}
 
-	data, err := os.ReadFile(path)
+	// The path is supplied by the operator through the --config flag, not by
+	// an untrusted caller.
+	data, err := os.ReadFile(path) // #nosec G304 -- operator-controlled config path.
 	if err != nil {
 		return nil, fmt.Errorf("reading config file %s: %w", path, err)
 	}
@@ -183,11 +185,11 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	// Validate timezone
-	if strings.ToUpper(c.Schedules.Timezone) != "UTC" {
-		if _, err := time.LoadLocation(c.Schedules.Timezone); err != nil {
-			return fmt.Errorf("schedules.timezone: unknown timezone %q: %w", c.Schedules.Timezone, err)
-		}
+	// Velero interprets cron expressions in UTC. The timezone option is
+	// validated but no conversion is applied, so refuse anything but UTC
+	// instead of silently ignoring the setting.
+	if tz := strings.TrimSpace(c.Schedules.Timezone); tz != "" && !strings.EqualFold(tz, "UTC") {
+		return fmt.Errorf("schedules.timezone: only UTC is supported (got %q)", c.Schedules.Timezone)
 	}
 
 	// Validate retention

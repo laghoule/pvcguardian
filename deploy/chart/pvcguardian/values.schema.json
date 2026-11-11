@@ -12,7 +12,8 @@
     "replicaCount": {
       "type": "integer",
       "minimum": 1,
-      "description": "Number of PVCGuardian daemon replicas"
+      "maximum": 1,
+      "description": "Number of PVCGuardian daemon replicas (must stay 1: leader election is not implemented yet)"
     },
     "image": {
       "type": "object",
@@ -148,7 +149,8 @@
           "properties": {
             "timezone": {
               "type": "string",
-              "minLength": 1
+              "enum": ["UTC"],
+              "description": "Only UTC is supported; Velero evaluates cron expressions in UTC"
             },
             "retention": {
               "type": "string",
