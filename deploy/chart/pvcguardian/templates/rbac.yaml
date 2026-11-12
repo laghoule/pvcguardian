@@ -35,7 +35,7 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: {{ include "pvcguardian.fullname" . }}
-  subjects:
+subjects:
   - kind: ServiceAccount
     name: {{ include "pvcguardian.serviceAccountName" . }}
     namespace: {{ .Release.Namespace }}

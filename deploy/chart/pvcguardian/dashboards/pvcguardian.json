@@ -50,7 +50,7 @@
         {
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "editorMode": "code",
-          "expr": "pvcguardian_schedules_managed",
+          "expr": "max(pvcguardian_schedules_managed)",
           "legendFormat": "Schedules",
           "range": true,
           "refId": "A"
@@ -76,7 +76,7 @@
         "overrides": []
       },
       "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
-      "id": 5,
+      "id": 3,
       "options": {
         "colorMode": "value",
         "graphMode": "none",
@@ -94,7 +94,7 @@
         {
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "editorMode": "code",
-          "expr": "pvcguardian_schedules_unmanaged",
+          "expr": "max(pvcguardian_schedules_unmanaged)",
           "legendFormat": "Schedules",
           "range": true,
           "refId": "A"
@@ -139,7 +139,7 @@
         {
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "editorMode": "code",
-          "expr": "pvcguardian_uncovered_pvcs",
+          "expr": "max(pvcguardian_uncovered_pvcs)",
           "legendFormat": "Uncovered PVCs",
           "range": true,
           "refId": "A"
@@ -210,7 +210,7 @@
         {
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "editorMode": "code",
-          "expr": "pvcguardian_releases_skipped",
+          "expr": "max by (reason) (pvcguardian_releases_skipped)",
           "instant": true,
           "legendFormat": "{{reason}}",
           "range": false,
@@ -343,7 +343,7 @@
         {
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "editorMode": "code",
-          "expr": "pvcguardian_uncovered_pvcs",
+          "expr": "max(pvcguardian_uncovered_pvcs)",
           "legendFormat": "Uncovered PVCs",
           "range": true,
           "refId": "A"
@@ -376,7 +376,7 @@
         {
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "editorMode": "code",
-          "expr": "pvcguardian_schedules_managed",
+          "expr": "max(pvcguardian_schedules_managed)",
           "legendFormat": "Active Schedules",
           "range": true,
           "refId": "A"
@@ -418,7 +418,7 @@
         {
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "editorMode": "code",
-          "expr": "pvcguardian_conflicting_units",
+          "expr": "max(pvcguardian_conflicting_units)",
           "legendFormat": "Conflicting Units",
           "range": true,
           "refId": "A"

@@ -375,7 +375,7 @@ func (r *Reconciler) IsHealthy() bool {
 // recordEvent publishes an event if a recorder is configured.
 func (r *Reconciler) recordEvent(eventType, reason, message string) {
 	if r.recorder != nil {
-		r.recorder.Eventf(&corev1.ObjectReference{
+		r.recorder.Event(&corev1.ObjectReference{
 			Kind:      "PVCGuardian",
 			Name:      "pvcguardian",
 			Namespace: r.cfg.Velero.Namespace,
