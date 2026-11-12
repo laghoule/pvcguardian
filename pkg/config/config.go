@@ -192,6 +192,9 @@ func (c *Config) Validate() error {
 	// Velero interprets cron expressions in UTC. The timezone option is
 	// validated but no conversion is applied, so refuse anything but UTC
 	// instead of silently ignoring the setting.
+	// TODO: Future improvement: support arbitrary timezones (e.g. America/Montreal,
+	// Europe/Paris) by converting local cron schedules/windows into UTC expressions
+	// (taking DST transitions into account) before programming Velero Schedules.
 	if tz := strings.TrimSpace(c.Schedules.Timezone); tz != "" && !strings.EqualFold(tz, "UTC") {
 		return fmt.Errorf("schedules.timezone: only UTC is supported (got %q)", c.Schedules.Timezone)
 	}
