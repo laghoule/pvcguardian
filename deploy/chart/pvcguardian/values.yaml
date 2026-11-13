@@ -1,4 +1,4 @@
-replicaCount: 1 # Must stay 1: PVCGuardian has no leader election yet.
+replicaCount: 1 # Scale up for a warm standby; only the leader reconciles.
 
 image:
   repository: ghcr.io/laghoule/pvcguardian

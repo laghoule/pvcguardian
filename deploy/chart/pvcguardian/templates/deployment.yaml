@@ -1,6 +1,4 @@
-{{- if gt (int .Values.replicaCount) 1 }}
-{{- fail "pvcguardian does not support replicaCount > 1 yet (no leader election)" }}
-{{- end }}
+{{- $metricsPort := splitList ":" .Values.config.metrics.addr | last }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -9,6 +7,13 @@ metadata:
     {{- include "pvcguardian.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
+  # Only the replica holding the leader-election lease reconciles Schedules, so
+  # a rolling update can run two pods without both writing concurrently.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ include "pvcguardian.name" . }}
@@ -38,20 +43,31 @@ spec:
             {{- toYaml .Values.securityContext | nindent 12 }}
           args:
             - "--config=/etc/pvcguardian/config.yaml"
+          env:
+            # Leader election inherits its coordinates from the Deployment. Not
+            # user configuration: the lease is named after the Deployment and
+            # lives in the namespace where PVCGuardian is installed.
+            - name: PVCGUARDIAN_LEASE_NAME
+              value: {{ include "pvcguardian.fullname" . | quote }}
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
           {{- if .Values.config.metrics.enabled }}
           ports:
+            # Keep the probe target aligned with config.metrics.addr.
             - name: metrics
-              containerPort: 8080
+              containerPort: {{ $metricsPort }}
               protocol: TCP
           livenessProbe:
             httpGet:
-              path: /healthz
+              path: /livez
               port: metrics
             initialDelaySeconds: 10
             periodSeconds: 15
           readinessProbe:
             httpGet:
-              path: /healthz
+              path: /readyz
               port: metrics
             initialDelaySeconds: 5
             periodSeconds: 10

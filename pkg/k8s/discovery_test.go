@@ -246,6 +246,12 @@ func TestDiscoverReleasesViaWorkloadVolumesAndOwnerReferences(t *testing.T) {
 			t.Errorf("expected app-b with %v, got %v", wantB, relB.PVCs)
 		}
 	}
+	// Only the PVC carrying the explicit release label is directly selectable
+	// by the generated Schedule; the StatefulSet-derived PVC is indirect.
+	wantIndirectB := []string{"data-app-b-db-0"}
+	if len(relB.IndirectPVCs) != len(wantIndirectB) || relB.IndirectPVCs[0] != wantIndirectB[0] {
+		t.Errorf("expected app-b indirect %v, got %v", wantIndirectB, relB.IndirectPVCs)
+	}
 
 	relD := findRelease(releases, "app-d")
 	if relD == nil {
@@ -259,6 +265,9 @@ func TestDiscoverReleasesViaWorkloadVolumesAndOwnerReferences(t *testing.T) {
 		if relD.PVCs[i] != want[i] {
 			t.Errorf("expected app-d PVCs %v, got %v", want, relD.PVCs)
 		}
+	}
+	if len(relD.IndirectPVCs) != len(want) {
+		t.Errorf("expected all app-d PVCs to be indirect, got %v", relD.IndirectPVCs)
 	}
 
 	wantUncovered := []string{"bad-ref-pvc", "data-app-b-db-cache", "manual-pvc"}

@@ -12,8 +12,7 @@
     "replicaCount": {
       "type": "integer",
       "minimum": 1,
-      "maximum": 1,
-      "description": "Number of PVCGuardian daemon replicas (must stay 1: leader election is not implemented yet)"
+      "description": "Number of PVCGuardian daemon replicas. Leader election ensures a single replica reconciles; extra replicas are warm standbys."
     },
     "image": {
       "type": "object",

@@ -2,8 +2,8 @@ apiVersion: v2
 name: pvcguardian
 description: Automated Velero schedule generator for Helm releases and selector-based backup units with PVCs
 type: application
-version: 0.4.1
-appVersion: "0.4.1"
+version: 0.5.0
+appVersion: "0.5.0"
 keywords:
   - backup
   - velero

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
@@ -39,10 +40,17 @@ type DiscoveredRelease struct {
 	Name            string
 	Chart           string
 	PVCs            []string          // PVC names belonging to this release
+	IndirectPVCs    []string          // PVCs associated through workload references rather than the Schedule's label selectors
 	OptIn           bool              // true if explicitly opted in via label="true"
 	AnnotatedPreset string            // preset specified in pvcguardian.io/preset annotation
 	Selector        map[string]string // matchLabels from pvcguardian.io/selector, nil for Helm-derived units
 	Conflict        bool              // true if unit had conflicting selectors, presets, or opt-in/opt-out
+}
+
+// pvcMatch records how a PVC was associated with a backup unit. Direct matches
+// are the ones the generated Velero Schedule can select from PVC labels alone.
+type pvcMatch struct {
+	Direct bool
 }
 
 // DiscoveryReport contains discovered releases, uncovered PVCs, and count of conflicting units.
@@ -67,6 +75,20 @@ func NewDiscovery(client kubernetes.Interface, logger *slog.Logger) *Discovery {
 		kubeClient: client,
 		logger:     logger,
 	}
+}
+
+// NamespaceExists reports whether a namespace still exists. It is used to
+// distinguish a deleted namespace (whose Schedules must be pruned) from a
+// namespace whose discovery failed transiently (whose Schedules must be kept).
+func (d *Discovery) NamespaceExists(ctx context.Context, name string) (bool, error) {
+	_, err := d.kubeClient.CoreV1().Namespaces().Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("getting namespace %s: %w", name, err)
+	}
+	return true, nil
 }
 
 // ListScannableNamespaces returns all cluster namespaces except those in excluded list.
@@ -116,12 +138,12 @@ func (d *Discovery) DiscoverReleases(ctx context.Context, namespace string) ([]D
 
 	conflictingUnits := d.filterConflictingUnits(namespace, releases)
 
-	pvcByRelease, uncoveredPVCs, err := d.associatePVCs(ctx, namespace, releases, workloadOwner)
+	pvcByRelease, indirectByRelease, uncoveredPVCs, err := d.associatePVCs(ctx, namespace, releases, workloadOwner)
 	if err != nil {
 		return nil, nil, 0, err
 	}
 
-	result := d.buildDiscoveredReleases(namespace, releases, pvcByRelease)
+	result := d.buildDiscoveredReleases(namespace, releases, pvcByRelease, indirectByRelease)
 	return result, uncoveredPVCs, conflictingUnits, nil
 }
 
@@ -323,15 +345,18 @@ func (d *Discovery) filterConflictingUnits(namespace string, releases map[string
 }
 
 // associatePVCs lists PVCs in the namespace and associates each to its backup unit(s).
+// It also records which associations are not directly expressible by the label
+// selectors written into the Velero Schedule.
 func (d *Discovery) associatePVCs(ctx context.Context, namespace string, releases map[string]*releaseMeta,
-	workloadOwner map[types.UID]string) (map[string][]string, []string, error) {
+	workloadOwner map[types.UID]string) (map[string][]string, map[string][]string, []string, error) {
 
 	pvcList, err := d.kubeClient.CoreV1().PersistentVolumeClaims(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return nil, nil, fmt.Errorf("listing PVCs in %s: %w", namespace, err)
+		return nil, nil, nil, fmt.Errorf("listing PVCs in %s: %w", namespace, err)
 	}
 
 	pvcByRelease := make(map[string][]string)
+	indirectByRelease := make(map[string][]string)
 	var uncoveredPVCs []string
 
 	for _, pvc := range pvcList.Items {
@@ -354,22 +379,27 @@ func (d *Discovery) associatePVCs(ctx context.Context, namespace string, release
 			continue
 		}
 
-		for name := range matched {
+		for name, match := range matched {
 			pvcByRelease[name] = append(pvcByRelease[name], pvc.Name)
+			if !match.Direct {
+				indirectByRelease[name] = append(indirectByRelease[name], pvc.Name)
+			}
 		}
 	}
 
-	return pvcByRelease, uncoveredPVCs, nil
+	return pvcByRelease, indirectByRelease, uncoveredPVCs, nil
 }
 
-// matchPVC identifies which releases/units a PVC belongs to.
+// matchPVC identifies which releases/units a PVC belongs to and whether the
+// association is directly selectable by the generated Schedule selectors.
 func (d *Discovery) matchPVC(pvc *corev1.PersistentVolumeClaim, namespace string,
-	releases map[string]*releaseMeta, workloadOwner map[types.UID]string) map[string]struct{} {
+	releases map[string]*releaseMeta, workloadOwner map[types.UID]string) map[string]pvcMatch {
 
 	// Explicit per-PVC release association takes precedence.
 	if release := strings.TrimSpace(pvc.Labels[ReleaseLabel]); release != "" {
 		if _, ok := releases[release]; ok {
-			return map[string]struct{}{release: {}}
+			d.warnNonExclusiveMatch(pvc, namespace, releases, release)
+			return map[string]pvcMatch{release: {Direct: true}}
 		}
 		d.logger.Warn("PVC references an unknown release",
 			"namespace", namespace,
@@ -378,16 +408,25 @@ func (d *Discovery) matchPVC(pvc *corev1.PersistentVolumeClaim, namespace string
 			"label", ReleaseLabel)
 	}
 
-	matched := make(map[string]struct{})
+	matched := make(map[string]pvcMatch)
 
-	// Selector-based units match PVCs directly by their labels.
+	// Selector-based units match PVCs directly by their labels. Helm-derived
+	// units match the instance label that the Schedule also selects on.
 	for name, rm := range releases {
-		if rm.selector != nil && matchesMatchLabels(rm.selector, pvc.Labels) {
-			matched[name] = struct{}{}
+		if rm.selector != nil {
+			if matchesMatchLabels(rm.selector, pvc.Labels) {
+				matched[name] = pvcMatch{Direct: true}
+			}
+			continue
+		}
+		if pvc.Labels[HelmInstanceLabel] == name {
+			matched[name] = pvcMatch{Direct: true}
 		}
 	}
 
-	// Legacy Helm association only applies to units without an explicit selector.
+	// Legacy Helm association only applies to units without an explicit
+	// selector. These PVCs are covered by the workload backup through Velero's
+	// additional-items handling, but not by the Schedule's label selectors.
 	legacyMatched := make(map[string]struct{})
 	if instance := pvc.Labels[HelmInstanceLabel]; instance != "" {
 		if rm, ok := releases[instance]; ok && rm.selector == nil {
@@ -431,25 +470,65 @@ func (d *Discovery) matchPVC(pvc *corev1.PersistentVolumeClaim, namespace string
 	}
 
 	for name := range legacyMatched {
-		matched[name] = struct{}{}
+		if _, alreadyDirect := matched[name]; alreadyDirect {
+			continue
+		}
+		matched[name] = pvcMatch{Direct: false}
 	}
 
 	return matched
 }
 
+// warnNonExclusiveMatch reports PVCs that are explicitly attached to one unit
+// while also matching the selectors of another. Velero ORs the selectors, so
+// the PVC can be included in more than one Schedule even though discovery
+// gives the explicit label precedence.
+func (d *Discovery) warnNonExclusiveMatch(pvc *corev1.PersistentVolumeClaim, namespace string,
+	releases map[string]*releaseMeta, explicit string) {
+
+	var alsoMatched []string
+	for name, rm := range releases {
+		if name == explicit {
+			continue
+		}
+		if rm.selector != nil {
+			if matchesMatchLabels(rm.selector, pvc.Labels) {
+				alsoMatched = append(alsoMatched, name)
+			}
+			continue
+		}
+		if pvc.Labels[HelmInstanceLabel] == name {
+			alsoMatched = append(alsoMatched, name)
+		}
+	}
+	if len(alsoMatched) == 0 {
+		return
+	}
+
+	sort.Strings(alsoMatched)
+	d.logger.Warn("PVC explicitly attached to one backup unit also matches other schedules; coverage is not exclusive",
+		"namespace", namespace,
+		"pvc", pvc.Name,
+		"explicitUnit", explicit,
+		"alsoMatchedBy", alsoMatched)
+}
+
 // buildDiscoveredReleases formats and sorts the final list of DiscoveredRelease objects.
 func (d *Discovery) buildDiscoveredReleases(namespace string, releases map[string]*releaseMeta,
-	pvcByRelease map[string][]string) []DiscoveredRelease {
+	pvcByRelease, indirectByRelease map[string][]string) []DiscoveredRelease {
 
 	var result []DiscoveredRelease
 	for name, meta := range releases {
 		pvcs := pvcByRelease[name]
 		sort.Strings(pvcs)
+		indirect := indirectByRelease[name]
+		sort.Strings(indirect)
 		result = append(result, DiscoveredRelease{
 			Namespace:       namespace,
 			Name:            name,
 			Chart:           meta.chart,
 			PVCs:            pvcs,
+			IndirectPVCs:    indirect,
 			OptIn:           meta.optInVal,
 			AnnotatedPreset: meta.preset,
 			Selector:        maps.Clone(meta.selector),

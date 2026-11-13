@@ -13,6 +13,12 @@ import (
 type FakeVeleroClient struct {
 	mu        sync.RWMutex
 	Schedules map[string]*velerov1.Schedule
+
+	// Optional injected failures, used to exercise reconciliation error paths.
+	ListErr   error
+	CreateErr error
+	UpdateErr error
+	DeleteErr error
 }
 
 // NewFakeVeleroClient returns an initialized in-memory Velero client.
@@ -25,6 +31,10 @@ func NewFakeVeleroClient() *FakeVeleroClient {
 func (f *FakeVeleroClient) ListSchedules(ctx context.Context, namespace, labelSelector string) ([]velerov1.Schedule, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
+
+	if f.ListErr != nil {
+		return nil, f.ListErr
+	}
 
 	var list []velerov1.Schedule
 	for _, sch := range f.Schedules {
@@ -49,6 +59,10 @@ func (f *FakeVeleroClient) CreateSchedule(ctx context.Context, sch *velerov1.Sch
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
+	if f.CreateErr != nil {
+		return nil, f.CreateErr
+	}
+
 	key := fmt.Sprintf("%s/%s", sch.Namespace, sch.Name)
 	if _, exists := f.Schedules[key]; exists {
 		return nil, fmt.Errorf("schedule %s already exists", key)
@@ -63,6 +77,10 @@ func (f *FakeVeleroClient) UpdateSchedule(ctx context.Context, sch *velerov1.Sch
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
+	if f.UpdateErr != nil {
+		return nil, f.UpdateErr
+	}
+
 	key := fmt.Sprintf("%s/%s", sch.Namespace, sch.Name)
 	if _, exists := f.Schedules[key]; !exists {
 		return nil, fmt.Errorf("schedule %s not found", key)
@@ -76,6 +94,10 @@ func (f *FakeVeleroClient) UpdateSchedule(ctx context.Context, sch *velerov1.Sch
 func (f *FakeVeleroClient) DeleteSchedule(ctx context.Context, namespace, name string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+
+	if f.DeleteErr != nil {
+		return f.DeleteErr
+	}
 
 	key := fmt.Sprintf("%s/%s", namespace, name)
 	if _, exists := f.Schedules[key]; !exists {

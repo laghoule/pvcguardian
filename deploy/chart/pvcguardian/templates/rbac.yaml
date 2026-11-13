@@ -68,3 +68,33 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "pvcguardian.serviceAccountName" . }}
     namespace: {{ .Release.Namespace }}
+---
+# Leader election lease, named after the Deployment and living in the namespace
+# where PVCGuardian is installed.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "pvcguardian.fullname" . }}-leader-election
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "pvcguardian.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "create", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "pvcguardian.fullname" . }}-leader-election
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "pvcguardian.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "pvcguardian.fullname" . }}-leader-election
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "pvcguardian.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}

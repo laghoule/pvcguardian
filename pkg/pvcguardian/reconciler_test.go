@@ -4,6 +4,7 @@ package pvcguardian
 import (
 	"context"
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
@@ -149,9 +150,10 @@ func TestReconcileOnceCreatesAndDeletesOrphans(t *testing.T) {
 		t.Fatalf("expected 2 schedules (1 managed + 1 unmanaged) in velero client, got %d", len(veleroClient.Schedules))
 	}
 
-	sch := veleroClient.Schedules["velero/pvcguardian-prod-app-with-pvc"]
+	scheduleKey := fmt.Sprintf("velero/%s", ScheduleName("prod", "app-with-pvc"))
+	sch := veleroClient.Schedules[scheduleKey]
 	if sch == nil {
-		t.Fatalf("expected schedule velero/pvcguardian-prod-app-with-pvc to exist")
+		t.Fatalf("expected schedule %s to exist", scheduleKey)
 	}
 
 	// SECOND CYCLE: idempotent pass (no creations, no updates, no deletions)
@@ -271,7 +273,7 @@ func TestReconcileUpdatesOnConfigChange(t *testing.T) {
 		t.Errorf("expected 1 updated schedule, got %d", res.UpdatedSchedules)
 	}
 
-	sch := veleroClient.Schedules["velero/pvcguardian-prod-app-a"]
+	sch := veleroClient.Schedules[fmt.Sprintf("velero/%s", ScheduleName("prod", "app-a"))]
 	if sch == nil || sch.Spec.Template.TTL.Duration != 10*24*time.Hour {
 		t.Errorf("expected updated TTL 10d, got %v", sch.Spec.Template.TTL.Duration)
 	}
@@ -313,7 +315,7 @@ func TestReconcileAppliesSelectorChanges(t *testing.T) {
 		t.Fatalf("initial reconcile failed: %v", err)
 	}
 
-	const scheduleKey = "velero/pvcguardian-prod-web"
+	scheduleKey := fmt.Sprintf("velero/%s", ScheduleName("prod", "web"))
 	sch := veleroClient.Schedules[scheduleKey]
 	if sch == nil {
 		t.Fatalf("expected schedule %s to exist", scheduleKey)
@@ -462,6 +464,403 @@ func TestNeedsUpdate(t *testing.T) {
 	}
 }
 
+func TestReconcileCreateFailureIsPartialAndUnhealthy(t *testing.T) {
+	ctx := context.Background()
+
+	kubeClient := fake.NewSimpleClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "prod"}},
+		&appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "web",
+				Namespace: "prod",
+				Labels: map[string]string{
+					k8s.HelmManagedByLabel: k8s.HelmManagedByValue,
+					k8s.HelmInstanceLabel:  "app-a",
+					k8s.OptInLabel:         "true",
+				},
+			},
+		},
+		&corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "web-data",
+				Namespace: "prod",
+				Labels:    map[string]string{k8s.HelmInstanceLabel: "app-a"},
+			},
+		},
+	)
+
+	cfg := config.DefaultConfig()
+	cfg.Velero.Namespace = "velero"
+	cfg.Reconcile.Interval = 10 * time.Second
+
+	veleroClient := k8s.NewFakeVeleroClient()
+	veleroClient.CreateErr = fmt.Errorf("injected create failure")
+	metrics := NewMetrics()
+	reconciler := NewReconciler(&cfg, "", k8s.NewDiscovery(kubeClient, nil), veleroClient, nil, metrics, nil)
+	// Pretend the daemon started long ago so the startup grace period is over.
+	reconciler.startTime = time.Now().Add(-time.Hour)
+
+	res, err := reconciler.ReconcileOnce(ctx)
+	if err == nil {
+		t.Fatalf("expected reconciliation to report the create failure")
+	}
+	if res.Outcome != OutcomePartial {
+		t.Errorf("expected partial outcome, got %q", res.Outcome)
+	}
+	if res.CreateErrors != 1 {
+		t.Errorf("expected 1 create error, got %d", res.CreateErrors)
+	}
+	if res.CreatedSchedules != 0 {
+		t.Errorf("expected no created schedule, got %d", res.CreatedSchedules)
+	}
+	if len(veleroClient.Schedules) != 0 {
+		t.Errorf("expected no schedule in the cluster, got %d", len(veleroClient.Schedules))
+	}
+	if reconciler.IsHealthy() {
+		t.Errorf("expected reconciler to be unhealthy after a failed first cycle")
+	}
+	if got := counterVecValue(t, metrics.ReconcileTotal, "result", "partial"); got != 1 {
+		t.Errorf("expected reconcile_total{result=partial} 1, got %v", got)
+	}
+	if got := counterVecValue(t, metrics.ReconcileOperationErrors, "operation", "create"); got != 1 {
+		t.Errorf("expected operation_errors{operation=create} 1, got %v", got)
+	}
+
+	// Removing the fault must restore both the schedule and readiness.
+	veleroClient.CreateErr = nil
+	res, err = reconciler.ReconcileOnce(ctx)
+	if err != nil {
+		t.Fatalf("second reconcile failed: %v", err)
+	}
+	if res.Outcome != OutcomeSuccess {
+		t.Errorf("expected success outcome, got %q", res.Outcome)
+	}
+	if got := counterVecValue(t, metrics.ReconcileTotal, "result", "success"); got != 1 {
+		t.Errorf("expected reconcile_total{result=success} 1, got %v", got)
+	}
+	if !reconciler.IsHealthy() {
+		t.Errorf("expected reconciler to become healthy after a successful cycle")
+	}
+	if got := gaugeValue(t, metrics.LastSuccessfulReconcile); got == 0 {
+		t.Errorf("expected last successful reconcile timestamp to be set")
+	}
+}
+
+func TestReconcileDeleteFailureIsPartial(t *testing.T) {
+	ctx := context.Background()
+
+	kubeClient := fake.NewSimpleClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "prod"}},
+		&appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "web",
+				Namespace: "prod",
+				Labels: map[string]string{
+					k8s.HelmManagedByLabel: k8s.HelmManagedByValue,
+					k8s.HelmInstanceLabel:  "app-a",
+					k8s.OptInLabel:         "true",
+				},
+			},
+		},
+		&corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "web-data",
+				Namespace: "prod",
+				Labels:    map[string]string{k8s.HelmInstanceLabel: "app-a"},
+			},
+		},
+	)
+
+	cfg := config.DefaultConfig()
+	cfg.Velero.Namespace = "velero"
+
+	veleroClient := k8s.NewFakeVeleroClient()
+	reconciler := NewReconciler(&cfg, "", k8s.NewDiscovery(kubeClient, nil), veleroClient, nil, nil, nil)
+
+	if _, err := reconciler.ReconcileOnce(ctx); err != nil {
+		t.Fatalf("initial reconcile failed: %v", err)
+	}
+
+	// Remove the PVC so the release becomes orphaned, then fail the deletion.
+	if err := kubeClient.CoreV1().PersistentVolumeClaims("prod").Delete(ctx, "web-data", metav1.DeleteOptions{}); err != nil {
+		t.Fatalf("deleting PVC: %v", err)
+	}
+	veleroClient.DeleteErr = fmt.Errorf("injected delete failure")
+
+	res, err := reconciler.ReconcileOnce(ctx)
+	if err == nil {
+		t.Fatalf("expected reconciliation to report the delete failure")
+	}
+	if res.Outcome != OutcomePartial || res.DeleteErrors != 1 {
+		t.Errorf("expected partial outcome with 1 delete error, got outcome=%q deleteErrors=%d", res.Outcome, res.DeleteErrors)
+	}
+	if veleroClient.Schedules[fmt.Sprintf("velero/%s", ScheduleName("prod", "app-a"))] == nil {
+		t.Errorf("schedule must be preserved when deletion fails")
+	}
+}
+
+func TestReconcileDeletesSchedulesForDeletedNamespace(t *testing.T) {
+	ctx := context.Background()
+
+	kubeClient := fake.NewSimpleClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "prod"}},
+		&appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "web",
+				Namespace: "prod",
+				Labels: map[string]string{
+					k8s.HelmManagedByLabel: k8s.HelmManagedByValue,
+					k8s.HelmInstanceLabel:  "app-a",
+					k8s.OptInLabel:         "true",
+				},
+			},
+		},
+		&corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "web-data",
+				Namespace: "prod",
+				Labels:    map[string]string{k8s.HelmInstanceLabel: "app-a"},
+			},
+		},
+	)
+
+	cfg := config.DefaultConfig()
+	cfg.Velero.Namespace = "velero"
+
+	veleroClient := k8s.NewFakeVeleroClient()
+	reconciler := NewReconciler(&cfg, "", k8s.NewDiscovery(kubeClient, nil), veleroClient, nil, nil, nil)
+
+	if _, err := reconciler.ReconcileOnce(ctx); err != nil {
+		t.Fatalf("initial reconcile failed: %v", err)
+	}
+	if veleroClient.Schedules[fmt.Sprintf("velero/%s", ScheduleName("prod", "app-a"))] == nil {
+		t.Fatalf("expected the initial schedule to exist")
+	}
+
+	// The namespace is gone, so its Schedule must not linger forever.
+	if err := kubeClient.CoreV1().Namespaces().Delete(ctx, "prod", metav1.DeleteOptions{}); err != nil {
+		t.Fatalf("deleting namespace: %v", err)
+	}
+
+	res, err := reconciler.ReconcileOnce(ctx)
+	if err != nil {
+		t.Fatalf("reconcile after namespace deletion failed: %v", err)
+	}
+	if res.DeletedSchedules != 1 {
+		t.Errorf("expected 1 deleted schedule, got %d", res.DeletedSchedules)
+	}
+	if len(veleroClient.Schedules) != 0 {
+		t.Errorf("expected no remaining schedule, got %d", len(veleroClient.Schedules))
+	}
+}
+
+func TestReconcileDeletesSchedulesForExcludedNamespace(t *testing.T) {
+	ctx := context.Background()
+
+	kubeClient := fake.NewSimpleClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "prod"}},
+		&appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "web",
+				Namespace: "prod",
+				Labels: map[string]string{
+					k8s.HelmManagedByLabel: k8s.HelmManagedByValue,
+					k8s.HelmInstanceLabel:  "app-a",
+					k8s.OptInLabel:         "true",
+				},
+			},
+		},
+		&corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "web-data",
+				Namespace: "prod",
+				Labels:    map[string]string{k8s.HelmInstanceLabel: "app-a"},
+			},
+		},
+	)
+
+	cfg := config.DefaultConfig()
+	cfg.Velero.Namespace = "velero"
+
+	veleroClient := k8s.NewFakeVeleroClient()
+	reconciler := NewReconciler(&cfg, "", k8s.NewDiscovery(kubeClient, nil), veleroClient, nil, nil, nil)
+
+	if _, err := reconciler.ReconcileOnce(ctx); err != nil {
+		t.Fatalf("initial reconcile failed: %v", err)
+	}
+
+	cfg.Discovery.ExcludeNamespaces = append(cfg.Discovery.ExcludeNamespaces, "prod")
+
+	res, err := reconciler.ReconcileOnce(ctx)
+	if err != nil {
+		t.Fatalf("reconcile after excluding namespace failed: %v", err)
+	}
+	if res.DeletedSchedules != 1 {
+		t.Errorf("expected 1 deleted schedule, got %d", res.DeletedSchedules)
+	}
+	if len(veleroClient.Schedules) != 0 {
+		t.Errorf("expected no remaining schedule, got %d", len(veleroClient.Schedules))
+	}
+}
+
+func TestReconcileReportsIndirectPVCs(t *testing.T) {
+	ctx := context.Background()
+
+	kubeClient := fake.NewSimpleClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "prod"}},
+		&appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "web",
+				Namespace: "prod",
+				Labels: map[string]string{
+					k8s.HelmManagedByLabel: k8s.HelmManagedByValue,
+					k8s.HelmInstanceLabel:  "app-a",
+					k8s.OptInLabel:         "true",
+				},
+			},
+			Spec: appsv1.DeploymentSpec{
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Volumes: []corev1.Volume{{
+							Name: "data",
+							VolumeSource: corev1.VolumeSource{
+								PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "web-data"},
+							},
+						}},
+					},
+				},
+			},
+		},
+		// The PVC is referenced by the pod but lacks the instance label, so
+		// the generated Schedule's selectors do not match it directly.
+		&corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{Name: "web-data", Namespace: "prod"},
+		},
+	)
+
+	cfg := config.DefaultConfig()
+	cfg.Velero.Namespace = "velero"
+
+	metrics := NewMetrics()
+	veleroClient := k8s.NewFakeVeleroClient()
+	reconciler := NewReconciler(&cfg, "", k8s.NewDiscovery(kubeClient, nil), veleroClient, nil, metrics, nil)
+
+	res, err := reconciler.ReconcileOnce(ctx)
+	if err != nil {
+		t.Fatalf("reconcile failed: %v", err)
+	}
+	if res.IndirectPVCs != 1 {
+		t.Errorf("expected 1 indirect PVC, got %d", res.IndirectPVCs)
+	}
+	if got := gaugeValue(t, metrics.IndirectPVCs); got != 1 {
+		t.Errorf("expected pvcs_not_directly_selected gauge 1, got %v", got)
+	}
+	if res.UncoveredPVCs != 0 {
+		t.Errorf("expected no uncovered PVC, got %d", res.UncoveredPVCs)
+	}
+}
+
+func TestInvalidConfigReloadIsPartialAndKeepsLastConfig(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	configPath := dir + "/config.yaml"
+	if err := os.WriteFile(configPath, []byte("velero:\n  namespace: velero\n"), 0o600); err != nil {
+		t.Fatalf("writing config: %v", err)
+	}
+
+	kubeClient := fake.NewSimpleClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "prod"}},
+		&appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "web",
+				Namespace: "prod",
+				Labels: map[string]string{
+					k8s.HelmManagedByLabel: k8s.HelmManagedByValue,
+					k8s.HelmInstanceLabel:  "app-a",
+					k8s.OptInLabel:         "true",
+				},
+			},
+		},
+		&corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "web-data",
+				Namespace: "prod",
+				Labels:    map[string]string{k8s.HelmInstanceLabel: "app-a"},
+			},
+		},
+	)
+
+	cfg := config.DefaultConfig()
+	cfg.Velero.Namespace = "velero"
+	veleroClient := k8s.NewFakeVeleroClient()
+	metrics := NewMetrics()
+	reconciler := NewReconciler(&cfg, configPath, k8s.NewDiscovery(kubeClient, nil), veleroClient, nil, metrics, nil)
+
+	if res, err := reconciler.ReconcileOnce(ctx); err != nil || res.Outcome != OutcomeSuccess {
+		t.Fatalf("initial reconcile: outcome=%q err=%v", res.Outcome, err)
+	}
+
+	// A malformed reload must not be reported as success, and must leave the
+	// last valid configuration (and its schedules) in place.
+	if err := os.WriteFile(configPath, []byte("discovery: [\n"), 0o600); err != nil {
+		t.Fatalf("writing invalid config: %v", err)
+	}
+	res, err := reconciler.ReconcileOnce(ctx)
+	if err == nil {
+		t.Fatalf("expected invalid config reload to be reported")
+	}
+	if res.Outcome != OutcomePartial || res.ConfigReloadErrors != 1 {
+		t.Errorf("expected partial outcome with 1 config reload error, got outcome=%q configReloadErrors=%d", res.Outcome, res.ConfigReloadErrors)
+	}
+	if veleroClient.Schedules[fmt.Sprintf("velero/%s", ScheduleName("prod", "app-a"))] == nil {
+		t.Errorf("expected the existing schedule to be preserved")
+	}
+	if got := counterVecValue(t, metrics.ReconcileOperationErrors, "operation", "config_reload"); got != 1 {
+		t.Errorf("expected operation_errors{operation=config_reload} 1, got %v", got)
+	}
+}
+
+func TestIsHealthyIsBoundedBeforeFirstSuccess(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Reconcile.Interval = 10 * time.Second
+
+	reconciler := NewReconciler(&cfg, "", nil, nil, nil, nil, nil)
+	reconciler.startTime = time.Now().Add(-time.Hour)
+	if reconciler.IsHealthy() {
+		t.Errorf("expected a daemon that never reconciled to become unhealthy")
+	}
+
+	reconciler.startTime = time.Now()
+	if !reconciler.IsHealthy() {
+		t.Errorf("expected startup grace period to keep the daemon ready")
+	}
+}
+
+// counterVecValue reads the value of one labelled series from a CounterVec.
+func counterVecValue(t *testing.T, cv *prometheus.CounterVec, labelName, labelValue string) float64 {
+	t.Helper()
+
+	reg := prometheus.NewRegistry()
+	if err := reg.Register(cv); err != nil {
+		t.Fatalf("registering counter vec: %v", err)
+	}
+	families, err := reg.Gather()
+	if err != nil {
+		t.Fatalf("gathering metrics: %v", err)
+	}
+	for _, family := range families {
+		for _, metric := range family.Metric {
+			for _, label := range metric.Label {
+				if label.GetName() == labelName && label.GetValue() == labelValue {
+					return metric.GetCounter().GetValue()
+				}
+			}
+		}
+	}
+	t.Fatalf("series with %s=%q not found", labelName, labelValue)
+	return 0
+}
+
 // gaugeValue reads the current value of a gauge without pulling in the
 // prometheus testutil package.
 func gaugeValue(t *testing.T, g prometheus.Gauge) float64 {
@@ -567,7 +966,7 @@ func TestReconcilePreservesSchedulesOnDiscoveryFailure(t *testing.T) {
 	if res.CreatedSchedules != 1 {
 		t.Fatalf("expected 1 created schedule, got %d", res.CreatedSchedules)
 	}
-	const scheduleKey = "velero/pvcguardian-prod-web-release"
+	scheduleKey := fmt.Sprintf("velero/%s", ScheduleName("prod", "web-release"))
 	if veleroClient.Schedules[scheduleKey] == nil {
 		t.Fatalf("expected schedule %s to exist", scheduleKey)
 	}

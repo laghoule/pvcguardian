@@ -1,4 +1,5 @@
 {{- if .Values.networkPolicy.enabled }}
+{{- $metricsPort := splitList ":" .Values.config.metrics.addr | last }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -20,7 +21,7 @@ spec:
   {{- else if .Values.config.metrics.enabled }}
   ingress:
     - ports:
-        - port: 8080
+        - port: {{ $metricsPort }}
           protocol: TCP
   {{- else }}
   ingress: []

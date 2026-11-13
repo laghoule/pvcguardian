@@ -47,21 +47,27 @@ func DeterministicHash(namespace, release string) string {
 }
 
 // ScheduleName formats a stable, truncated Kubernetes object name (<= 63 chars).
-// Format: pvcguardian-<namespace>-<release>, or pvcguardian-<prefix-trunc>-<hash8>
+// Format: pvcguardian-<namespace>-<release>-<hash8>.
+//
+// The hash is always part of the name. It disambiguates identities that become
+// identical after sanitization (a_b and a-b) and pairs whose concatenation is
+// ambiguous (namespace "a-b", release "c" versus namespace "a", release
+// "b-c"). Relying on the short form alone would make one of the two units
+// impossible to create because both would map to the same Schedule name.
 func ScheduleName(namespace, release string) string {
 	raw := fmt.Sprintf("%s%s-%s", SchedulePrefix, namespace, release)
 	// Sanitize to valid k8s name chars
 	raw = strings.ToLower(raw)
 	raw = sanitizeK8sName(raw)
 
-	if len(raw) <= MaxK8sNameLen {
-		return raw
-	}
-
 	hash8 := DeterministicHash(namespace, release)[:HashSuffixLen]
-	// Max length for prefix is 63 - 1 (dash) - 8 (hash) = 54
+	// Max length for prefix is 63 - 1 (dash) - 8 (hash) = 54.
 	maxPrefix := MaxK8sNameLen - HashSuffixLen - 1
-	prefix := strings.TrimRight(raw[:maxPrefix], "-")
+	prefix := raw
+	if len(prefix) > maxPrefix {
+		prefix = prefix[:maxPrefix]
+	}
+	prefix = strings.TrimRight(prefix, "-")
 	return fmt.Sprintf("%s-%s", prefix, hash8)
 }
 

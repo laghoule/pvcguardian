@@ -22,6 +22,7 @@ func TestMetricsObserveAndServer(t *testing.T) {
 		SkippedNoPVC:       2,
 		SkippedConflict:    1,
 		UncoveredPVCs:      3,
+		IndirectPVCs:       4,
 		ConflictingUnits:   1,
 	}
 	m.ObserveCycle(150*time.Millisecond, res, nil)
@@ -61,6 +62,9 @@ func TestMetricsObserveAndServer(t *testing.T) {
 	if !containsString(bodyStr, "pvcguardian_reconcile_total") {
 		t.Errorf("expected pvcguardian_reconcile_total in metrics output")
 	}
+	if !containsString(bodyStr, "pvcguardian_leader 0") {
+		t.Errorf("expected pvcguardian_leader 0 in metrics output")
+	}
 	if !containsString(bodyStr, "pvcguardian_schedules_managed 2") {
 		t.Errorf("expected pvcguardian_schedules_managed 2 in metrics output")
 	}
@@ -91,6 +95,15 @@ func TestMetricsObserveAndServer(t *testing.T) {
 	if !containsString(bodyStr, "pvcguardian_conflicting_units 1") {
 		t.Errorf("expected pvcguardian_conflicting_units 1 in metrics output")
 	}
+	if !containsString(bodyStr, "pvcguardian_pvcs_not_directly_selected 4") {
+		t.Errorf("expected pvcguardian_pvcs_not_directly_selected 4 in metrics output")
+	}
+	if !containsString(bodyStr, `pvcguardian_reconcile_total{result="success"} 1`) {
+		t.Errorf("expected reconcile_total success 1 in metrics output")
+	}
+	if !containsString(bodyStr, "pvcguardian_last_successful_reconcile_timestamp_seconds") {
+		t.Errorf("expected last successful reconcile timestamp in metrics output")
+	}
 
 	// Test healthChecker reporting unhealthy
 	m.SetHealthChecker(func() bool { return false })
@@ -102,6 +115,25 @@ func TestMetricsObserveAndServer(t *testing.T) {
 		t.Errorf("expected 503 for unhealthy healthz, got %d", unhealthyResp.StatusCode)
 	}
 	_ = unhealthyResp.Body.Close()
+
+	readyResp, err := http.Get("http://" + addr + "/readyz")
+	if err != nil {
+		t.Fatalf("readyz request failed: %v", err)
+	}
+	if readyResp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("expected 503 for unhealthy readyz, got %d", readyResp.StatusCode)
+	}
+	_ = readyResp.Body.Close()
+
+	// Liveness must not depend on reconciliation success.
+	liveResp, err := http.Get("http://" + addr + "/livez")
+	if err != nil {
+		t.Fatalf("livez request failed: %v", err)
+	}
+	if liveResp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 for livez, got %d", liveResp.StatusCode)
+	}
+	_ = liveResp.Body.Close()
 }
 
 func containsString(s, substr string) bool {

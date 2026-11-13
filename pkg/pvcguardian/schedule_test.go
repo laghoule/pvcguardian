@@ -23,9 +23,10 @@ func TestDeterministicHashAndName(t *testing.T) {
 		t.Fatalf("different apps should have different hashes")
 	}
 
-	// Short name test
+	// Short names also carry the hash so sanitized or ambiguous identities
+	// cannot collide.
 	shortName := ScheduleName("prod", "web")
-	expectedShort := "pvcguardian-prod-web"
+	expectedShort := "pvcguardian-prod-web-" + DeterministicHash("prod", "web")[:HashSuffixLen]
 	if shortName != expectedShort {
 		t.Errorf("expected %s, got %s", expectedShort, shortName)
 	}
@@ -39,6 +40,15 @@ func TestDeterministicHashAndName(t *testing.T) {
 	hash8 := DeterministicHash("production-eu-west-1", longRelease)[:HashSuffixLen]
 	if !strings.HasSuffix(longName, hash8) {
 		t.Errorf("long name %s should end with hash8 %s", longName, hash8)
+	}
+
+	// Identity pairs whose raw concatenation is identical must not collide.
+	if a, b := ScheduleName("a-b", "c"), ScheduleName("a", "b-c"); a == b {
+		t.Errorf("ambiguous identities collided on %s", a)
+	}
+	// Characters sanitized to '-' must not collapse distinct identities.
+	if a, b := ScheduleName("team_a", "db"), ScheduleName("team-a", "db"); a == b {
+		t.Errorf("sanitized identities collided on %s", a)
 	}
 }
 
@@ -134,8 +144,8 @@ func TestBuildSchedule(t *testing.T) {
 	if sch.Namespace != "velero-backup" {
 		t.Errorf("expected namespace velero-backup, got %s", sch.Namespace)
 	}
-	if sch.Name != "pvcguardian-prod-web-server" {
-		t.Errorf("expected name pvcguardian-prod-web-server, got %s", sch.Name)
+	if expected := ScheduleName("prod", "web-server"); sch.Name != expected {
+		t.Errorf("expected name %s, got %s", expected, sch.Name)
 	}
 	if sch.Labels[ManagedByLabel] != ManagedByValue {
 		t.Errorf("missing managed-by label")

@@ -75,7 +75,11 @@ func main() {
 	metrics := pvcguardian.NewMetrics()
 	reconciler := pvcguardian.NewReconciler(cfg, *configPath, discovery, veleroClient, nil, metrics, logger)
 
-	metrics.SetHealthChecker(reconciler.IsHealthy)
+	// A standby replica is ready without reconciling. A leader must have
+	// completed a successful cycle recently.
+	metrics.SetHealthChecker(func() bool {
+		return !reconciler.IsLeader() || reconciler.IsHealthy()
+	})
 
 	if cfg.Metrics.Enabled {
 		logger.Info("Starting Prometheus metrics server", "addr", cfg.Metrics.Addr)
@@ -87,8 +91,8 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	if err := reconciler.RunLoop(ctx); err != nil && err != context.Canceled {
-		logger.Error("Reconciler exited with error", "error", err)
+	if err := reconciler.RunWithLeaderElection(ctx, kubeClient); err != nil {
+		logger.Error("PVCGuardian exited with error", "error", err)
 		os.Exit(1)
 	}
 

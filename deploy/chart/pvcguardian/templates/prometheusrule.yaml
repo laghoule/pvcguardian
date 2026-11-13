@@ -26,6 +26,44 @@ spec:
             summary: "PVCGuardian reconciliation errors detected"
             description: "PVCGuardian has failed {{ `{{ $value }}` }} reconciliation cycles in the last hour."
 
+        - alert: PVCGuardianReconcilePartial
+          expr: increase(pvcguardian_reconcile_total{result="partial"}[1h]) > 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "PVCGuardian reconciliations are partially failing"
+            description: "PVCGuardian completed {{ `{{ $value }}` }} cycles in the last hour with at least one discovery or Schedule write failure."
+
+        - alert: PVCGuardianScheduleWriteErrors
+          expr: increase(pvcguardian_reconcile_operation_errors_total{operation=~"build|create|update|delete|name_collision"}[15m]) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "PVCGuardian cannot create or update some Velero Schedules"
+            description: "{{ `{{ $value }}` }} schedule build/write operations failed in the last 15 minutes. Some backup units may not be protected."
+
+        - alert: PVCGuardianNoActiveLeader
+          expr: sum(pvcguardian_leader) != 1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "PVCGuardian has no single active leader"
+            description: "The sum of pvcguardian_leader across replicas is not 1. Either no replica holds the lease, or leadership is split."
+
+        - alert: PVCGuardianNotReady
+          # max() ignores standby replicas (which keep the gauge at 0) and > 0
+          # avoids firing before the first successful reconciliation.
+          expr: (time() - max(pvcguardian_last_successful_reconcile_timestamp_seconds) > 3600) and (max(pvcguardian_last_successful_reconcile_timestamp_seconds) > 0)
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "PVCGuardian has not completed a successful reconciliation recently"
+            description: "The last fully successful reconciliation was {{ `{{ $value | humanizeDuration }}` }} ago."
+
         - alert: PVCGuardianUncoveredPVCs
           expr: pvcguardian_uncovered_pvcs > 0
           for: 30m
@@ -34,6 +72,15 @@ spec:
           annotations:
             summary: "PVCs not covered by any backup unit"
             description: "There are {{ `{{ $value }}` }} PersistentVolumeClaims in scanned namespaces that are not covered by any Velero schedule."
+
+        - alert: PVCGuardianPVCsNotDirectlySelected
+          expr: pvcguardian_pvcs_not_directly_selected > 0
+          for: 1h
+          labels:
+            severity: info
+          annotations:
+            summary: "PVC coverage relies on Velero additional items"
+            description: "{{ `{{ $value }}` }} PVCs are associated with a backup unit through workload references but are not matched by the Schedule label selectors. Validate their restoration, or label them with pvcguardian.io/release."
 
         - alert: PVCGuardianConflictingUnits
           expr: pvcguardian_conflicting_units > 0

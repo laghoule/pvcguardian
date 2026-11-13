@@ -32,6 +32,24 @@ kubectl get pods -n pvcguardian -l app.kubernetes.io/name=pvcguardian
 kubectl logs -n pvcguardian -l app.kubernetes.io/name=pvcguardian -f
 ```
 
+### Upgrading from 0.4.x
+
+Schedule names now always include an 8-character hash suffix
+(`pvcguardian-<namespace>-<unit>-<hash8>`). On the first reconciliation after
+the upgrade, PVCGuardian creates the new Schedule before deleting the old one,
+so a failed rename keeps the previous protection. Existing `Backup` objects are
+never deleted.
+
+The chart now probes `/livez` for liveness and `/readyz` for readiness. Both
+endpoints require the matching image version.
+
+Replicas now use leader election through a Lease named after the Deployment, in
+the release namespace. Only the leader reconciles, so the Deployment uses a
+`RollingUpdate` strategy (`maxUnavailable: 0`, `maxSurge: 1`) and `replicaCount`
+may be raised for a warm standby. The chart creates a dedicated Role and
+RoleBinding for `leases` in the release namespace and injects the Deployment name
+and pod namespace automatically; no new value is involved.
+
 ---
 
 ## Configuration Reference
@@ -40,7 +58,7 @@ The following table lists the configurable parameters of the chart and their def
 
 | Parameter | Description | Default |
 |---|---|---|
-| `replicaCount` | Number of PVCGuardian daemon replicas (keep at `1`; there is no leader election yet) | `1` |
+| `replicaCount` | Number of PVCGuardian daemon replicas. Leader election keeps a single active reconciler; extra replicas are warm standbys | `1` |
 | `image.repository` | Image repository | `ghcr.io/laghoule/pvcguardian` |
 | `image.tag` | Image tag (defaults to `v` + `Chart.appVersion`) | `""` |
 | `image.pullPolicy` | Image pull policy | `IfNotPresent` |
@@ -72,7 +90,7 @@ The following table lists the configurable parameters of the chart and their def
 | `config.logging.level` | Logging level (`debug`, `info`, `warn`, `error`) | `info` |
 | `config.logging.format` | Logging format (`json`, `text`) | `json` |
 | `config.metrics.enabled` | Enable Prometheus metrics endpoint | `true` |
-| `config.metrics.addr` | Listening address for `/metrics` and `/healthz` | `:8080` |
+| `config.metrics.addr` | Listening address for `/metrics`, `/livez`, `/readyz`, and `/healthz` | `:8080` |
 | `podMonitor.enabled` | Create Prometheus Operator PodMonitor | `false` |
 | `podMonitor.namespace` | PodMonitor namespace (default: release namespace) | `""` |
 | `podMonitor.interval` | Scrape interval | `30s` |
@@ -80,11 +98,21 @@ The following table lists the configurable parameters of the chart and their def
 | `prometheusRule.enabled` | Create Prometheus Operator alerting rules | `false` |
 | `prometheusRule.namespace` | PrometheusRule namespace (default: release namespace) | `""` |
 | `networkPolicy.enabled` | Create restrictive default NetworkPolicy | `true` |
-| `networkPolicy.ingress` | Ingress rules (empty = allow 8080 if metrics enabled) | `[]` |
+| `networkPolicy.ingress` | Ingress rules (empty = allow the configured metrics port if metrics enabled) | `[]` |
 | `networkPolicy.egress` | Egress rules (DNS 53 and Kube API 443/6443) | `DNS + Kube API` |
 | `dashboard.enabled` | Deploy Grafana dashboard ConfigMap | `true` |
 | `dashboard.namespace` | Target namespace for the dashboard ConfigMap | `""` (release namespace) |
 | `dashboard.labels` | Labels for Grafana sidecar autodiscovery (`grafana_dashboard: "1"`) | `{ grafana_dashboard: "1" }` |
+
+---
+
+## Grafana Dashboard
+
+With `dashboard.enabled=true`, the chart deploys a ConfigMap discovered by the
+Grafana sidecar. The dashboard covers Schedule inventory, reconciliation
+outcomes and latency, leader election (`pvcguardian_leader`), the age of the
+last successful reconciliation, operation errors by type, and direct versus
+indirect PVC coverage.
 
 ---
 
