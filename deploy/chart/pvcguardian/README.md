@@ -77,6 +77,7 @@ The following table lists the configurable parameters of the chart and their def
 | `config.velero.storageLocation` | Velero BackupStorageLocation (empty = Velero default) | `""` |
 | `config.velero.defaultVolumesToFsBackup` | Use Kopia filesystem backup for all volumes | `true` |
 | `config.velero.snapshotVolumes` | Use CSI volume snapshots (can combine with fs backup) | `false` |
+| `config.velero.instanceID` | Identifier isolating this installation's Schedules when several share the Velero namespace (lowercase DNS label, empty for a single installation) | `""` |
 | `config.schedules.timezone` | Reserved; windows are always evaluated in UTC | `UTC` |
 | `config.schedules.retention` | Backup retention duration (`5d`, `120h`, `30m`) | `5d` |
 | `config.schedules.windows.day.from` | Start of day window (HH:MM) | `10:00` |
@@ -103,6 +104,41 @@ The following table lists the configurable parameters of the chart and their def
 | `dashboard.enabled` | Deploy Grafana dashboard ConfigMap | `true` |
 | `dashboard.namespace` | Target namespace for the dashboard ConfigMap | `""` (release namespace) |
 | `dashboard.labels` | Labels for Grafana sidecar autodiscovery (`grafana_dashboard: "1"`) | `{ grafana_dashboard: "1" }` |
+
+### NetworkPolicy limitations
+
+The default egress rule allows HTTPS (443) and 6443 to `0.0.0.0/0`. This is a
+port-based allowance, not a restriction to the Kubernetes API server: the pod
+can still reach any IPv4 address on those ports. The chart does not know the
+API server address, which varies by distribution (ClusterIP `kubernetes.default`,
+managed endpoint, or node address), and a policy that guesses it would cut the
+controller off from the API.
+
+To restrict egress to the API server, override `networkPolicy.egress` with the
+actual endpoint once it is known, for example:
+
+```yaml
+networkPolicy:
+  egress:
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - to:
+        - ipBlock:
+            cidr: <API_SERVER_IP>/32
+      ports:
+        - port: <API_SERVER_PORT>
+          protocol: TCP
+```
+
+Find the endpoint with `kubectl get endpoints kubernetes -n default`. Verify the
+policy after the change: PVCGuardian must still acquire its leader lease and
+complete a reconciliation cycle (`pvcguardian_last_successful_reconcile_timestamp_seconds`
+keeps advancing, and `/readyz` returns success).
 
 ---
 

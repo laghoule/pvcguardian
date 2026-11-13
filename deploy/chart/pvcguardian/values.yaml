@@ -23,6 +23,8 @@ podSecurityContext:
   runAsUser: 65532
   runAsGroup: 65532
   fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
 
 securityContext:
   allowPrivilegeEscalation: false
@@ -55,6 +57,9 @@ config:
     storageLocation: ""
     defaultVolumesToFsBackup: true
     snapshotVolumes: false
+    # Set a unique identifier per installation when several PVCGuardian
+    # releases target the same Velero namespace. Empty means single installation.
+    instanceID: ""
 
   schedules:
     timezone: UTC # Only UTC is supported; Velero cron expressions are UTC-based.

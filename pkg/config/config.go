@@ -13,9 +13,10 @@ import (
 )
 
 var (
-	cronFieldRegex = regexp.MustCompile(`^\S+\s+\S+\s+\S+\s+\S+\s+\S+$`)
-	timeRegex      = regexp.MustCompile(`^([01]\d|2[0-3]):([0-5]\d)$`)
-	retentionRegex = regexp.MustCompile(`^(\d+)([dhm])$`)
+	cronFieldRegex  = regexp.MustCompile(`^\S+\s+\S+\s+\S+\s+\S+\s+\S+$`)
+	timeRegex       = regexp.MustCompile(`^([01]\d|2[0-3]):([0-5]\d)$`)
+	retentionRegex  = regexp.MustCompile(`^(\d+)([dhm])$`)
+	instanceIDRegex = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`)
 )
 
 // TimeWindow defines an open-ended daily interval (e.g. from 20:00 to 23:00)
@@ -66,6 +67,9 @@ type VeleroConfig struct {
 	StorageLocation          string `yaml:"storageLocation"` // optional
 	DefaultVolumesToFsBackup bool   `yaml:"defaultVolumesToFsBackup"`
 	SnapshotVolumes          bool   `yaml:"snapshotVolumes"` // default false
+	// InstanceID isolates several PVCGuardian installations sharing the same
+	// Velero namespace. Only Schedules carrying this identifier are managed.
+	InstanceID string `yaml:"instanceID"` // default "" (single installation)
 }
 
 // SchedulesConfig holds presets windows, custom crons, timezone and retention.
@@ -180,6 +184,10 @@ func (c *Config) Validate() error {
 		if _, _, err := win.WindowMinutes(); err != nil {
 			return fmt.Errorf("schedules.windows[%s]: %w", name, err)
 		}
+	}
+
+	if id := c.Velero.InstanceID; id != "" && !instanceIDRegex.MatchString(id) {
+		return fmt.Errorf("velero.instanceID %q must be a lowercase DNS label (max 32 chars)", id)
 	}
 
 	// Validate custom cron expressions (must be standard 5-part cron)

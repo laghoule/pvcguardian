@@ -53,11 +53,12 @@ type pvcMatch struct {
 	Direct bool
 }
 
-// DiscoveryReport contains discovered releases, uncovered PVCs, and count of conflicting units.
+// DiscoveryReport contains discovered releases, uncovered PVCs, and the conflicting units.
 type DiscoveryReport struct {
 	Releases         []DiscoveredRelease
 	UncoveredPVCs    []string
 	ConflictingUnits int
+	ConflictingNames []string
 }
 
 // Discovery holds context and clients needed to scan workloads and PVCs.
@@ -131,20 +132,35 @@ type releaseMeta struct {
 // DiscoverReleases scans workloads in a namespace and associates their PVCs.
 // It returns discovered releases, uncovered PVC names, and the count of units skipped due to conflicts.
 func (d *Discovery) DiscoverReleases(ctx context.Context, namespace string) ([]DiscoveredRelease, []string, int, error) {
-	releases, workloadOwner, err := d.collectWorkloadReleases(ctx, namespace)
+	report, err := d.DiscoverReport(ctx, namespace)
 	if err != nil {
 		return nil, nil, 0, err
 	}
+	return report.Releases, report.UncoveredPVCs, report.ConflictingUnits, nil
+}
 
-	conflictingUnits := d.filterConflictingUnits(namespace, releases)
+// DiscoverReport performs the same scan as DiscoverReleases and also returns the
+// names of conflicting units, so that callers can keep their existing Schedules
+// instead of treating a misconfigured unit as deleted.
+func (d *Discovery) DiscoverReport(ctx context.Context, namespace string) (DiscoveryReport, error) {
+	releases, workloadOwner, err := d.collectWorkloadReleases(ctx, namespace)
+	if err != nil {
+		return DiscoveryReport{}, err
+	}
+
+	conflicting := d.filterConflictingUnits(namespace, releases)
 
 	pvcByRelease, indirectByRelease, uncoveredPVCs, err := d.associatePVCs(ctx, namespace, releases, workloadOwner)
 	if err != nil {
-		return nil, nil, 0, err
+		return DiscoveryReport{}, err
 	}
 
-	result := d.buildDiscoveredReleases(namespace, releases, pvcByRelease, indirectByRelease)
-	return result, uncoveredPVCs, conflictingUnits, nil
+	return DiscoveryReport{
+		Releases:         d.buildDiscoveredReleases(namespace, releases, pvcByRelease, indirectByRelease),
+		UncoveredPVCs:    uncoveredPVCs,
+		ConflictingUnits: len(conflicting),
+		ConflictingNames: conflicting,
+	}, nil
 }
 
 // collectWorkloadReleases queries Deployments, StatefulSets, DaemonSets, CronJobs, and Jobs
@@ -322,12 +338,13 @@ func (d *Discovery) recordWorkload(namespace, kind, name string, meta metav1.Obj
 	rm.prefixes = append(rm.prefixes, claimPrefixes...)
 }
 
-// filterConflictingUnits removes units that have incompatible selectors, presets, or opt-in settings.
-func (d *Discovery) filterConflictingUnits(namespace string, releases map[string]*releaseMeta) int {
-	conflictingUnits := 0
+// filterConflictingUnits removes units that have incompatible selectors, presets, or opt-in settings
+// and returns their names in sorted order.
+func (d *Discovery) filterConflictingUnits(namespace string, releases map[string]*releaseMeta) []string {
+	var conflicting []string
 	for name, rm := range releases {
 		if rm.selectorConflict || rm.presetConflict || rm.optInConflict {
-			conflictingUnits++
+			conflicting = append(conflicting, name)
 			reason := "conflicting selectors"
 			if rm.presetConflict {
 				reason = "conflicting presets"
@@ -341,7 +358,8 @@ func (d *Discovery) filterConflictingUnits(namespace string, releases map[string
 			delete(releases, name)
 		}
 	}
-	return conflictingUnits
+	sort.Strings(conflicting)
+	return conflicting
 }
 
 // associatePVCs lists PVCs in the namespace and associates each to its backup unit(s).

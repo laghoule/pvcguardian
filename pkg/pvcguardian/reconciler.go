@@ -193,21 +193,30 @@ func (r *Reconciler) ReconcileOnce(ctx context.Context) (result *ReconcileResult
 	desiredSchedules := make(map[string]*velerov1.Schedule)
 	scheduleNames := make(map[string]string)
 	scannedNamespaces := make(map[string]bool)
+	// protectedSources lists units whose configuration is currently invalid or
+	// unbuildable. Their existing schedules are kept rather than pruned.
+	protectedSources := make(map[string]bool)
 	var discoveryErrCount int
 	totalUncovered := 0
 	totalIndirect := 0
 	totalConflicts := 0
 
 	for _, ns := range namespaces {
-		releases, uncovered, conflicts, err := r.discovery.DiscoverReleases(ctx, ns)
+		report, err := r.discovery.DiscoverReport(ctx, ns)
 		if err != nil {
 			discoveryErrCount++
 			r.logger.Error("Failed to discover releases in namespace; skipping schedule cleanup for this namespace", "namespace", ns, "error", err)
 			continue
 		}
 		scannedNamespaces[ns] = true
-		totalConflicts += conflicts
-		result.SkippedConflict += conflicts
+		totalConflicts += report.ConflictingUnits
+		result.SkippedConflict += report.ConflictingUnits
+		for _, name := range report.ConflictingNames {
+			protectedSources[fmt.Sprintf("%s/%s", ns, name)] = true
+		}
+
+		releases := report.Releases
+		uncovered := report.UncoveredPVCs
 
 		result.DiscoveredReleases += len(releases)
 
@@ -220,6 +229,8 @@ func (r *Reconciler) ReconcileOnce(ctx context.Context) (result *ReconcileResult
 		}
 
 		for _, rel := range releases {
+			key := fmt.Sprintf("%s/%s", rel.Namespace, rel.Name)
+
 			// Require explicit opt-in label on the release
 			if !rel.OptIn {
 				r.logger.Debug("Skipping release without opt-in label",
@@ -238,7 +249,8 @@ func (r *Reconciler) ReconcileOnce(ctx context.Context) (result *ReconcileResult
 			sch, err := builder.BuildSchedule(rel)
 			if err != nil {
 				result.BuildErrors++
-				r.logger.Error("Failed to build schedule for release",
+				protectedSources[key] = true
+				r.logger.Error("Failed to build schedule for release; keeping its existing schedule",
 					"namespace", ns, "release", rel.Name, "error", err)
 				continue
 			}
@@ -254,7 +266,6 @@ func (r *Reconciler) ReconcileOnce(ctx context.Context) (result *ReconcileResult
 					"pvcs", rel.IndirectPVCs)
 			}
 
-			key := fmt.Sprintf("%s/%s", rel.Namespace, rel.Name)
 			if previous, exists := scheduleNames[sch.Name]; exists && previous != key {
 				result.NameCollisions++
 				r.logger.Error("Schedule name collision; refusing to overwrite another backup unit",
@@ -283,7 +294,7 @@ func (r *Reconciler) ReconcileOnce(ctx context.Context) (result *ReconcileResult
 
 	existingList := make([]velerov1.Schedule, 0, len(allSchedules))
 	for _, sch := range allSchedules {
-		if sch.Labels[ManagedByLabel] == ManagedByValue {
+		if sch.Labels[ManagedByLabel] == ManagedByValue && sch.Labels[InstanceLabel] == cfg.Velero.InstanceID {
 			existingList = append(existingList, sch)
 		}
 	}
@@ -355,8 +366,8 @@ func (r *Reconciler) ReconcileOnce(ctx context.Context) (result *ReconcileResult
 		}
 
 		if r.needsUpdate(existing, desired) {
-			desired.ResourceVersion = existing.ResourceVersion
-			updated, err := r.veleroClient.UpdateSchedule(ctx, desired)
+			merged := mergeManagedFields(existing, desired)
+			updated, err := r.veleroClient.UpdateSchedule(ctx, merged)
 			if err != nil {
 				result.UpdateErrors++
 				r.logger.Error("Failed to update schedule",
@@ -407,6 +418,13 @@ func (r *Reconciler) ReconcileOnce(ctx context.Context) (result *ReconcileResult
 			}
 			result.DeletedSchedules++
 			r.recordEvent("Warning", "ScheduleDeleted", fmt.Sprintf("Deleted schedule %s for %s (namespace deleted or excluded)", existing.Name, key))
+			continue
+		}
+
+		if protectedSources[key] {
+			r.logger.Warn("Preserving schedule for a backup unit with invalid configuration or build error",
+				"schedule", existing.Name,
+				"source", key)
 			continue
 		}
 
@@ -484,6 +502,38 @@ func (r *Reconciler) removedNamespace(ctx context.Context, namespace string, exc
 		return false, err
 	}
 	return !exists, nil
+}
+
+// mergeManagedFields returns a copy of existing in which only the fields owned
+// by PVCGuardian are replaced by their desired values. Everything else set by
+// an operator on the Velero Schedule (spec.paused, hooks, extra labels and
+// annotations, ...) is preserved.
+func mergeManagedFields(existing, desired *velerov1.Schedule) *velerov1.Schedule {
+	merged := existing.DeepCopy()
+
+	merged.Spec.Schedule = desired.Spec.Schedule
+	merged.Spec.Template.IncludedNamespaces = desired.Spec.Template.IncludedNamespaces
+	merged.Spec.Template.OrLabelSelectors = desired.Spec.Template.OrLabelSelectors
+	merged.Spec.Template.LabelSelector = desired.Spec.Template.LabelSelector
+	merged.Spec.Template.TTL = desired.Spec.Template.TTL
+	merged.Spec.Template.StorageLocation = desired.Spec.Template.StorageLocation
+	merged.Spec.Template.DefaultVolumesToFsBackup = desired.Spec.Template.DefaultVolumesToFsBackup
+	merged.Spec.Template.SnapshotVolumes = desired.Spec.Template.SnapshotVolumes
+
+	if merged.Labels == nil {
+		merged.Labels = make(map[string]string)
+	}
+	for k, v := range desired.Labels {
+		merged.Labels[k] = v
+	}
+	if merged.Annotations == nil {
+		merged.Annotations = make(map[string]string)
+	}
+	for k, v := range desired.Annotations {
+		merged.Annotations[k] = v
+	}
+
+	return merged
 }
 
 // needsUpdate checks whether any field that affects backup behavior differs

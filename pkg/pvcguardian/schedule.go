@@ -24,6 +24,8 @@ const (
 	PresetAnno          = "pvcguardian.io/preset"
 	FullNameAnno        = "pvcguardian.io/full-name"
 	NameHashLabel       = "pvcguardian.io/name-hash"
+	// InstanceLabel identifies the PVCGuardian installation that owns a Schedule.
+	InstanceLabel = "pvcguardian.io/instance"
 
 	SchedulePrefix = "pvcguardian-"
 	MaxK8sNameLen  = 63
@@ -69,6 +71,20 @@ func ScheduleName(namespace, release string) string {
 	}
 	prefix = strings.TrimRight(prefix, "-")
 	return fmt.Sprintf("%s-%s", prefix, hash8)
+}
+
+// scheduleLabels returns the ownership labels of a generated Schedule. The
+// instance label is only set when an instance identifier is configured, so
+// existing single-installation Schedules are not relabelled.
+func scheduleLabels(instanceID, hash8 string) map[string]string {
+	labels := map[string]string{
+		ManagedByLabel: ManagedByValue,
+		NameHashLabel:  hash8,
+	}
+	if instanceID != "" {
+		labels[InstanceLabel] = instanceID
+	}
+	return labels
 }
 
 func sanitizeK8sName(s string) string {
@@ -188,10 +204,7 @@ func (b *ScheduleBuilder) BuildSchedule(rel k8s.DiscoveredRelease) (*velerov1.Sc
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: b.cfg.Velero.Namespace,
-			Labels: map[string]string{
-				ManagedByLabel: ManagedByValue,
-				NameHashLabel:  hash8,
-			},
+			Labels:    scheduleLabels(b.cfg.Velero.InstanceID, hash8),
 			Annotations: map[string]string{
 				FullNameAnno:        fullName,
 				SourceNamespaceAnno: rel.Namespace,
